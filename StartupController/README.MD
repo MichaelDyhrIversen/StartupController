@@ -42,5 +42,5 @@ App icon made by Rocket icons created by Freepik - Flaticon [www.flaticon.com](h
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the GNU GPLv3 License. See [LICENSE](LICENSE) for details.
 

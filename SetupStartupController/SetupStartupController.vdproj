@@ -15,7 +15,7 @@
     {
         "Entry"
         {
-        "MsmKey" = "8:_78D8435AF5774EEF89D8E67D8F91A016"
+        "MsmKey" = "8:_92B95AF0C353460795AD4B4E1F333C41"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
         }
@@ -33,7 +33,7 @@
         "DisplayName" = "8:Debug"
         "IsDebugOnly" = "11:TRUE"
         "IsReleaseOnly" = "11:FALSE"
-        "OutputFilename" = "8:Debug\\SetupStartupController.msi"
+        "OutputFilename" = "8:Debug\\StartupController.msi"
         "PackageFilesAs" = "3:2"
         "PackageFileSize" = "3:-2147483648"
         "CabType" = "3:1"
@@ -49,7 +49,7 @@
         "DisplayName" = "8:Release"
         "IsDebugOnly" = "11:FALSE"
         "IsReleaseOnly" = "11:TRUE"
-        "OutputFilename" = "8:Release\\SetupStartupController.msi"
+        "OutputFilename" = "8:Release\\StartupController.msi"
         "PackageFilesAs" = "3:2"
         "PackageFileSize" = "3:-2147483648"
         "CabType" = "3:1"
@@ -118,7 +118,7 @@
         {
             "{3C67513D-01DD-4637-8A68-80971EB9504F}:_0A81150EBE984DCFAF28FE1C996C1614"
             {
-            "DefaultLocation" = "8:[ProgramFiles64Folder][Manufacturer]\\[ProductName]"
+            "DefaultLocation" = "8:[ProgramFiles64Folder][ProductName]"
             "Name" = "8:#1925"
             "AlwaysCreate" = "11:FALSE"
             "Condition" = "8:"
@@ -137,6 +137,17 @@
             "Property" = "8:ProgramMenuFolder"
                 "Folders"
                 {
+                    "{9EF0B969-E518-4E46-987F-47570745A589}:_61FC83758A8C49259AF62C9674E0223C"
+                    {
+                    "Name" = "8:StartupController"
+                    "AlwaysCreate" = "11:FALSE"
+                    "Condition" = "8:"
+                    "Transitive" = "11:FALSE"
+                    "Property" = "8:_35346D97214C42209B2DDA13698BAB50"
+                        "Folders"
+                        {
+                        }
+                    }
                 }
             }
             "{1525181F-901A-416C-8A58-119130FE478E}:_EFAFF2BCE2E542918A879BD0E7B7D858"
@@ -167,7 +178,7 @@
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:StartupController"
         "ProductCode" = "8:{30B0662A-657D-4E70-B263-08F27C079411}"
-        "PackageCode" = "8:{E1137CEB-A519-4280-B496-6F057CB6FC3A}"
+        "PackageCode" = "8:{935911FE-E0EE-4E2D-B282-3F0F22DF67D8}"
         "UpgradeCode" = "8:{E07E5FE3-DAA3-4BDC-88E1-2DBAC1283197}"
         "AspNetVersion" = "8:4.0.30319.0"
         "RestartWWWService" = "11:FALSE"
@@ -315,6 +326,20 @@
         }
         "Shortcut"
         {
+            "{970C0BB2-C7D0-45D7-ABFA-7EC378858BC0}:_94AFA2C550A34CC5B46B889B903FFD18"
+            {
+            "Name" = "8:StartupController"
+            "Arguments" = "8:"
+            "Description" = "8:"
+            "ShowCmd" = "3:1"
+            "IconIndex" = "3:0"
+            "Transitive" = "11:FALSE"
+            "Target" = "8:_92B95AF0C353460795AD4B4E1F333C41"
+            "Folder" = "8:_61FC83758A8C49259AF62C9674E0223C"
+            "WorkingFolder" = "8:_0A81150EBE984DCFAF28FE1C996C1614"
+            "Icon" = "8:_9477652BC3314DBA9C0E02AA58F7D372"
+            "Feature" = "8:"
+            }
         }
         "UserInterface"
         {
@@ -714,9 +739,9 @@
         }
         "ProjectOutput"
         {
-            "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_78D8435AF5774EEF89D8E67D8F91A016"
+            "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_92B95AF0C353460795AD4B4E1F333C41"
             {
-            "SourcePath" = "8:..\\StartupController\\obj\\Debug\\net8.0-windows\\StartupController.dll"
+            "SourcePath" = "8:..\\StartupController\\obj\\Release\\net8.0-windows\\apphost.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_0A81150EBE984DCFAF28FE1C996C1614"
@@ -735,7 +760,7 @@
             "IsolateTo" = "8:"
             "ProjectOutputGroupRegister" = "3:1"
             "OutputConfiguration" = "8:"
-            "OutputGroupCanonicalName" = "8:Built"
+            "OutputGroupCanonicalName" = "8:PublishItems"
             "OutputProjectGuid" = "8:{BC6B70AF-4FC0-439B-8DC3-B9599F1B3554}"
             "ShowKeyOutput" = "11:TRUE"
                 "ExcludeFilters"
