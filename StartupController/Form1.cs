@@ -26,12 +26,31 @@ namespace StartupController
                 this.ShowInTaskbar = true;
             };
             notifyIcon.Icon = this.Icon;
+            // Ensure notify icon is visible so the app can be restored from tray
+            notifyIcon.Visible = true;
+
+            // Hide to tray when minimized if the user setting is enabled
+            this.Resize += (s, e) =>
+            {
+                if (this.WindowState == FormWindowState.Minimized && UserSettingsService.GetStartToTray())
+                {
+                    this.Hide();
+                    this.ShowInTaskbar = false;
+                    notifyIcon.Visible = true;
+                }
+            };
+
             var exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += (s, e) => Application.Exit();
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
             notifyIcon.ContextMenuStrip = new ContextMenuStrip();
             notifyIcon.ContextMenuStrip.Items.Add(exitItem);
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
+            chkLaunchToTray.Checked = UserSettingsService.GetStartToTray();
+            chkLaunchToTray.CheckedChanged += (s, e) =>
+            {
+                UserSettingsService.SetStartToTray(chkLaunchToTray.Checked);
+            };
             chkSilenceNotifications.Checked = UserSettingsService.GetSilenceNotifications();
             chkSilenceNotifications.CheckedChanged += (s, e) =>
             {
@@ -58,6 +77,7 @@ namespace StartupController
                 if (chkLaunchProgramsOnStartup.Checked && this.LaunchFromStartup)
                 {
                     await LaunchEnabledProgramsAsync();
+                    Application.Exit();
                 }
             };
         }
@@ -74,7 +94,7 @@ namespace StartupController
                     StartupRegistryService registryService = new StartupRegistryService();
                     return registryService.GetStartupPrograms();
                 });
-                ShowStartupNotification($"Loaded {startupPrograms.Count.ToString()} startup programs.");
+                //ShowStartupNotification($"Loaded {startupPrograms.Count.ToString()} startup programs.");
                 RefreshListView();
             }
             catch (Exception ex)

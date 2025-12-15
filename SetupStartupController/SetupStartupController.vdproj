@@ -43,6 +43,14 @@
         "PrivateKeyFile" = "8:"
         "TimeStampServer" = "8:"
         "InstallerBootstrapper" = "3:2"
+            "BootstrapperCfg:{63ACBE69-63AA-4F98-B2B6-99F9E24495F2}"
+            {
+            "Enabled" = "11:TRUE"
+            "PromptEnabled" = "11:TRUE"
+            "PrerequisitesLocation" = "2:1"
+            "Url" = "8:"
+            "ComponentsUrl" = "8:"
+            }
         }
         "Release"
         {
@@ -59,6 +67,14 @@
         "PrivateKeyFile" = "8:"
         "TimeStampServer" = "8:"
         "InstallerBootstrapper" = "3:2"
+            "BootstrapperCfg:{63ACBE69-63AA-4F98-B2B6-99F9E24495F2}"
+            {
+            "Enabled" = "11:TRUE"
+            "PromptEnabled" = "11:TRUE"
+            "PrerequisitesLocation" = "2:1"
+            "Url" = "8:"
+            "ComponentsUrl" = "8:"
+            }
         }
     }
     "Deployable"
@@ -177,15 +193,15 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:StartupController"
-        "ProductCode" = "8:{30B0662A-657D-4E70-B263-08F27C079411}"
-        "PackageCode" = "8:{935911FE-E0EE-4E2D-B282-3F0F22DF67D8}"
+        "ProductCode" = "8:{15A3A186-A549-451D-9051-11E17D8A29C6}"
+        "PackageCode" = "8:{E3FFDF20-8A7F-4CF8-AC52-15E6AFABD9AD}"
         "UpgradeCode" = "8:{E07E5FE3-DAA3-4BDC-88E1-2DBAC1283197}"
         "AspNetVersion" = "8:4.0.30319.0"
         "RestartWWWService" = "11:FALSE"
         "RemovePreviousVersions" = "11:FALSE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.0.0"
+        "ProductVersion" = "8:1.0.1"
         "Manufacturer" = "8:QCompany"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"
@@ -741,7 +757,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_92B95AF0C353460795AD4B4E1F333C41"
             {
-            "SourcePath" = "8:..\\StartupController\\obj\\Release\\net8.0-windows\\apphost.exe"
+            "SourcePath" = "8:..\\StartupController\\obj\\Debug\\net8.0-windows\\apphost.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_0A81150EBE984DCFAF28FE1C996C1614"
