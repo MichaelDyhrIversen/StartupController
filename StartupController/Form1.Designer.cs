@@ -47,6 +47,10 @@
             components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             listViewStartup = new ListView();
+            columnHeaderName = new ColumnHeader();
+            columnHeaderPath = new ColumnHeader();
+            columnHeaderEnabled = new ColumnHeader();
+            columnHeaderDescription = new ColumnHeader();
             btnEnable = new Button();
             btnDisable = new Button();
             btnLaunch = new Button();
@@ -60,31 +64,9 @@
             chkLaunchToTray = new CheckBox();
             SuspendLayout();
             // 
-            // listViewStartup Columns
-            // 
-            columnHeaderName = new ColumnHeader();
-            columnHeaderPath = new ColumnHeader();
-            columnHeaderEnabled = new ColumnHeader();
-            columnHeaderDescription = new ColumnHeader();
-
-            columnHeaderName.Text = "Name";
-            columnHeaderName.Width = 140;
-            columnHeaderPath.Text = "Path";
-            columnHeaderPath.Width = 220;
-            columnHeaderEnabled.Text = "Status";
-            columnHeaderEnabled.Width = 80;
-            columnHeaderDescription.Text = "Description";
-            columnHeaderDescription.Width = 170;
-
-            listViewStartup.Columns.AddRange(new ColumnHeader[] {
-                columnHeaderName,
-                columnHeaderPath,
-                columnHeaderEnabled,
-                columnHeaderDescription
-            });
-            // 
             // listViewStartup
             // 
+            listViewStartup.Columns.AddRange(new ColumnHeader[] { columnHeaderName, columnHeaderPath, columnHeaderEnabled, columnHeaderDescription });
             listViewStartup.FullRowSelect = true;
             listViewStartup.Location = new Point(12, 12);
             listViewStartup.Name = "listViewStartup";
@@ -92,7 +74,26 @@
             listViewStartup.TabIndex = 0;
             listViewStartup.UseCompatibleStateImageBehavior = false;
             listViewStartup.View = View.Details;
-            
+            // 
+            // columnHeaderName
+            // 
+            columnHeaderName.Text = "Name";
+            columnHeaderName.Width = 140;
+            // 
+            // columnHeaderPath
+            // 
+            columnHeaderPath.Text = "Path";
+            columnHeaderPath.Width = 220;
+            // 
+            // columnHeaderEnabled
+            // 
+            columnHeaderEnabled.Text = "Status";
+            columnHeaderEnabled.Width = 80;
+            // 
+            // columnHeaderDescription
+            // 
+            columnHeaderDescription.Text = "Description";
+            columnHeaderDescription.Width = 170;
             // 
             // btnEnable
             // 
@@ -202,8 +203,12 @@
             Controls.Add(chkSilenceNotifications);
             Controls.Add(chkLaunchProgramsOnStartup);
             Controls.Add(chkLaunchToTray);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
             Icon = (Icon)resources.GetObject("$this.Icon");
+            MaximizeBox = false;
             Name = "Form1";
+            ShowInTaskbar = false;
+            SizeGripStyle = SizeGripStyle.Hide;
             StartPosition = FormStartPosition.CenterScreen;
             Text = "StartupController";
             ResumeLayout(false);

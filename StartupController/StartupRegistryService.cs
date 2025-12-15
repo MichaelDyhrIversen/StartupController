@@ -50,8 +50,16 @@ namespace StartupController
         private bool IsProgramEnabled(RegistryKey approvedKey, string name)
         {
             var value = approvedKey.GetValue(name) as byte[];
+            // If no value or empty array treat as disabled
+            if (value == null || value.Length == 0)
+                return false;
+
+            // If all bytes are zero, treat as enabled
+            if (value.All(b => b == 0x00))
+                return true;
+
             // Enabled: 0x02 0x00 0x00 0x00..., Disabled: 0x03 0x00 0x00 0x00...
-            return value != null && value.Length > 0 && value[0] == 0x02;
+            return value[0] == 0x02;
         }
 
         // Enable or disable a startup program
