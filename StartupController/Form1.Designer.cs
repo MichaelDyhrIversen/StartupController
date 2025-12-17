@@ -13,14 +13,15 @@
         private System.Windows.Forms.Button btnMoveUp;
         private System.Windows.Forms.Button btnMoveDown;
         private System.Windows.Forms.Button btnSaveOrder;
+        private System.Windows.Forms.Button btnViewLogs;
         private System.Windows.Forms.Button btnHelp;
         private System.Windows.Forms.NotifyIcon notifyIcon;
         private System.Windows.Forms.CheckBox chkSilenceNotifications;
         private System.Windows.Forms.CheckBox chkLaunchProgramsOnStartup;
         private System.Windows.Forms.CheckBox chkLaunchToTray;
         private System.Windows.Forms.ColumnHeader columnHeaderName;
-        private System.Windows.Forms.ColumnHeader columnHeaderPath;
         private System.Windows.Forms.ColumnHeader columnHeaderEnabled;
+        private System.Windows.Forms.ColumnHeader columnHeaderPath;
         private System.Windows.Forms.ColumnHeader columnHeaderDescription;
 
         /// <summary>
@@ -47,16 +48,13 @@
             components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             listViewStartup = new ListView();
-            columnHeaderName = new ColumnHeader();
-            columnHeaderPath = new ColumnHeader();
-            columnHeaderEnabled = new ColumnHeader();
-            columnHeaderDescription = new ColumnHeader();
             btnEnable = new Button();
             btnDisable = new Button();
             btnLaunch = new Button();
             btnMoveUp = new Button();
             btnMoveDown = new Button();
             btnSaveOrder = new Button();
+            btnViewLogs = new Button();
             btnHelp = new Button();
             chkSilenceNotifications = new CheckBox();
             notifyIcon = new NotifyIcon(components);
@@ -64,9 +62,31 @@
             chkLaunchToTray = new CheckBox();
             SuspendLayout();
             // 
+            // listViewStartup Columns
+            // 
+            columnHeaderName = new ColumnHeader();
+            columnHeaderEnabled = new ColumnHeader();
+            columnHeaderPath = new ColumnHeader();
+            columnHeaderDescription = new ColumnHeader();
+
+            columnHeaderName.Text = "Name";
+            columnHeaderName.Width = 140;
+            columnHeaderEnabled.Text = "Status";
+            columnHeaderEnabled.Width = 80;
+            columnHeaderPath.Text = "Path";
+            columnHeaderPath.Width = 220;
+            columnHeaderDescription.Text = "Description";
+            columnHeaderDescription.Width = 170;
+
+            listViewStartup.Columns.AddRange(new ColumnHeader[] {
+                columnHeaderName,
+                columnHeaderEnabled,
+                columnHeaderPath,
+                columnHeaderDescription
+            });
+            // 
             // listViewStartup
             // 
-            listViewStartup.Columns.AddRange(new ColumnHeader[] { columnHeaderName, columnHeaderPath, columnHeaderEnabled, columnHeaderDescription });
             listViewStartup.FullRowSelect = true;
             listViewStartup.Location = new Point(12, 12);
             listViewStartup.Name = "listViewStartup";
@@ -74,26 +94,9 @@
             listViewStartup.TabIndex = 0;
             listViewStartup.UseCompatibleStateImageBehavior = false;
             listViewStartup.View = View.Details;
-            // 
-            // columnHeaderName
-            // 
-            columnHeaderName.Text = "Name";
-            columnHeaderName.Width = 140;
-            // 
-            // columnHeaderPath
-            // 
-            columnHeaderPath.Text = "Path";
-            columnHeaderPath.Width = 220;
-            // 
-            // columnHeaderEnabled
-            // 
-            columnHeaderEnabled.Text = "Status";
-            columnHeaderEnabled.Width = 80;
-            // 
-            // columnHeaderDescription
-            // 
-            columnHeaderDescription.Text = "Description";
-            columnHeaderDescription.Width = 170;
+            // make the listview resize with the form
+            listViewStartup.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            
             // 
             // btnEnable
             // 
@@ -102,6 +105,8 @@
             btnEnable.Size = new Size(120, 32);
             btnEnable.TabIndex = 1;
             btnEnable.Text = "Enable";
+            // anchor buttons to the top-right so they follow the right edge but don't resize
+            btnEnable.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnDisable
             // 
@@ -110,6 +115,7 @@
             btnDisable.Size = new Size(120, 32);
             btnDisable.TabIndex = 2;
             btnDisable.Text = "Disable";
+            btnDisable.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnLaunch
             // 
@@ -118,6 +124,7 @@
             btnLaunch.Size = new Size(120, 32);
             btnLaunch.TabIndex = 3;
             btnLaunch.Text = "Launch";
+            btnLaunch.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnMoveUp
             // 
@@ -126,6 +133,7 @@
             btnMoveUp.Size = new Size(120, 32);
             btnMoveUp.TabIndex = 4;
             btnMoveUp.Text = "Move Up";
+            btnMoveUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnMoveDown
             // 
@@ -134,6 +142,7 @@
             btnMoveDown.Size = new Size(120, 32);
             btnMoveDown.TabIndex = 5;
             btnMoveDown.Text = "Move Down";
+            btnMoveDown.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnSaveOrder
             // 
@@ -142,14 +151,25 @@
             btnSaveOrder.Size = new Size(120, 32);
             btnSaveOrder.TabIndex = 6;
             btnSaveOrder.Text = "Save Order";
+            btnSaveOrder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            // 
+            // btnViewLogs
+            // 
+            btnViewLogs.Location = new Point(660, 252);
+            btnViewLogs.Name = "btnViewLogs";
+            btnViewLogs.Size = new Size(120, 32);
+            btnViewLogs.TabIndex = 7;
+            btnViewLogs.Text = "View Logs";
+            btnViewLogs.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnHelp
             // 
-            btnHelp.Location = new Point(660, 252);
+            btnHelp.Location = new Point(660, 292);
             btnHelp.Name = "btnHelp";
             btnHelp.Size = new Size(120, 32);
-            btnHelp.TabIndex = 7;
+            btnHelp.TabIndex = 8;
             btnHelp.Text = "Help";
+            btnHelp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // chkSilenceNotifications
             // 
@@ -157,9 +177,11 @@
             chkSilenceNotifications.Location = new Point(12, 320);
             chkSilenceNotifications.Name = "chkSilenceNotifications";
             chkSilenceNotifications.Size = new Size(134, 19);
-            chkSilenceNotifications.TabIndex = 8;
+            chkSilenceNotifications.TabIndex = 9;
             chkSilenceNotifications.Text = "Silence Notifications";
             chkSilenceNotifications.UseVisualStyleBackColor = true;
+            // keep checkboxes anchored to bottom so they stay at the bottom when resizing
+            chkSilenceNotifications.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             // 
             // notifyIcon
             // 
@@ -176,6 +198,7 @@
             chkLaunchProgramsOnStartup.TabIndex = 2;
             chkLaunchProgramsOnStartup.Text = "Launch Enabled Programs On System Startup";
             chkLaunchProgramsOnStartup.UseVisualStyleBackColor = true;
+            chkLaunchProgramsOnStartup.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             // 
             // chkLaunchToTray
             // 
@@ -186,12 +209,16 @@
             chkLaunchToTray.TabIndex = 2;
             chkLaunchToTray.Text = "Launch To Tray";
             chkLaunchToTray.UseVisualStyleBackColor = true;
+            chkLaunchToTray.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(800, 360);
+            // allow the form to be resized
+            this.MinimumSize = new Size(816, 399);
+            this.AutoScaleMode = AutoScaleMode.Font;
             Controls.Add(listViewStartup);
             Controls.Add(btnEnable);
             Controls.Add(btnDisable);
@@ -199,16 +226,13 @@
             Controls.Add(btnMoveUp);
             Controls.Add(btnMoveDown);
             Controls.Add(btnSaveOrder);
+            Controls.Add(btnViewLogs);
             Controls.Add(btnHelp);
             Controls.Add(chkSilenceNotifications);
             Controls.Add(chkLaunchProgramsOnStartup);
             Controls.Add(chkLaunchToTray);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
             Icon = (Icon)resources.GetObject("$this.Icon");
-            MaximizeBox = false;
             Name = "Form1";
-            ShowInTaskbar = false;
-            SizeGripStyle = SizeGripStyle.Hide;
             StartPosition = FormStartPosition.CenterScreen;
             Text = "StartupController";
             ResumeLayout(false);
@@ -217,5 +241,9 @@
         }
 
         #endregion
+
+
+
+        
     }
 }

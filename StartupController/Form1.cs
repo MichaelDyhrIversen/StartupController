@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
+using System.Text.RegularExpressions;
+using System.IO;
 using System.Windows.Forms;
 
 namespace StartupController
@@ -38,6 +40,10 @@ namespace StartupController
                     this.ShowInTaskbar = false;
                     notifyIcon.Visible = true;
                 }
+
+                // Always adjust columns on resize (unless minimized)
+                if (this.WindowState != FormWindowState.Minimized)
+                    AdjustListViewColumns();
             };
 
             var exitItem = new ToolStripMenuItem("Exit");
@@ -45,6 +51,11 @@ namespace StartupController
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
             notifyIcon.ContextMenuStrip = new ContextMenuStrip();
             notifyIcon.ContextMenuStrip.Items.Add(exitItem);
+            // Add menu item to open log file from tray menu and to the View Logs button
+            var openLogsItem = new ToolStripMenuItem("Open Logs");
+            openLogsItem.Click += (s, e) => LoggingService.OpenLogFile();
+            notifyIcon.ContextMenuStrip.Items.Add(openLogsItem);
+            btnViewLogs.Click += (s, e) => LoggingService.OpenLogFile();
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
             chkLaunchToTray.Checked = UserSettingsService.GetStartToTray();
             chkLaunchToTray.CheckedChanged += (s, e) =>
@@ -73,6 +84,8 @@ namespace StartupController
             };
             this.Load += async (s, e) =>
             {
+                LoggingService.StartSession(string.Join(' ', Environment.GetCommandLineArgs()));
+                LoggingService.LogInfo("Loading startup programs");
                 await LoadStartupPrograms();
                 if (chkLaunchProgramsOnStartup.Checked && this.LaunchFromStartup)
                 {
@@ -80,6 +93,9 @@ namespace StartupController
                     Application.Exit();
                 }
             };
+
+            // initial column sizing
+            AdjustListViewColumns();
         }
 
         private List<StartupProgram> startupPrograms = new List<StartupProgram>();
@@ -96,10 +112,12 @@ namespace StartupController
                 });
                 //ShowStartupNotification($"Loaded {startupPrograms.Count.ToString()} startup programs.");
                 RefreshListView();
+                LoggingService.LogInfo($"Loaded {startupPrograms.Count} startup programs");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to load startup programs: {ex.Message}");
+                LoggingService.LogError("Failed to load startup programs", ex);
+                ShowNotification($"Failed to load startup programs: {ex.Message}");
             }
         }
 
@@ -111,12 +129,76 @@ namespace StartupController
                 var item = new ListViewItem(new[]
                 {
             prog.Name,
-            prog.Path,
             prog.Enabled ? "Enabled" : "Disabled",
+            prog.Path,
             prog.Description
         });
                 item.Tag = prog;
                 listViewStartup.Items.Add(item);
+            }
+
+            AdjustListViewColumns();
+        }
+        /*
+        private void AdjustListViewColumns()
+        {
+            try
+            {
+                // Ensure there is space calculations based on client width
+                var avail = listViewStartup.ClientSize.Width;
+                // Reserve widths for Name, Status and Description columns (min values)
+                int nameMin = 140;
+                int statusWidth = 80; // small fixed for status
+                int descMin = 170;
+                int padding = 8; // some padding
+
+                int pathWidth = avail - (nameMin + statusWidth + descMin + padding);
+                if (pathWidth < 100) pathWidth = 100; // minimum for path
+
+                // Apply widths (column order: Name, Status, Path, Description)
+                if (listViewStartup.Columns.Count >= 4)
+                {
+                    listViewStartup.BeginUpdate();
+                    listViewStartup.Columns[0].Width = nameMin;
+                    listViewStartup.Columns[1].Width = statusWidth;
+                    listViewStartup.Columns[2].Width = pathWidth;
+                    listViewStartup.Columns[3].Width = descMin;
+                    listViewStartup.EndUpdate();
+                }
+            }
+            catch
+            {
+                // ignore layout failures
+            }
+        }*/
+
+        private void AdjustListViewColumns()
+        {
+            // Reserve space for fixed columns
+            int nameWidth = 140;
+            int statusWidth = 80;
+            int descWidth = 170;
+
+            // Calculate the available width for the Path column
+            int pathWidth = listViewStartup.ClientSize.Width - nameWidth - statusWidth - descWidth - 20; // 20px for padding
+
+            // Ensure minimum width
+            if (pathWidth < 100) pathWidth = 100;
+
+            // Begin updating the ListView columns
+            listViewStartup.BeginUpdate();
+            try
+            {
+                // Set the widths of the columns by index
+                listViewStartup.Columns[0].Width = nameWidth;
+                listViewStartup.Columns[1].Width = statusWidth;
+                listViewStartup.Columns[2].Width = pathWidth;
+                listViewStartup.Columns[3].Width = descWidth;
+            }
+            finally
+            {
+                // Ensure the ListView ends the update
+                listViewStartup.EndUpdate();
             }
         }
 
@@ -133,7 +215,8 @@ namespace StartupController
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to enable program: {ex.Message}");
+                LoggingService.LogError("Failed to toggle program", ex);
+                ShowNotification($"Failed to enable program: {ex.Message}");
             }
         }
         private async void EnableSelectedProgram()
@@ -149,7 +232,8 @@ namespace StartupController
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to enable program: {ex.Message}");
+                LoggingService.LogError("Failed to enable program", ex);
+                ShowNotification($"Failed to enable program: {ex.Message}");
             }
         }
 
@@ -165,8 +249,50 @@ namespace StartupController
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to disable program: {ex.Message}");
+                LoggingService.LogError("Failed to disable program", ex);
+                ShowNotification($"Failed to disable program: {ex.Message}");
             }
+        }
+
+        // Helper: split a registry "run" command into executable path and arguments
+        private static (string exePath, string args) SplitCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                return ("", "");
+
+            command = command.Trim();
+
+            // If starts with a quote, take the quoted part as the exe path
+            if (command.StartsWith("\""))
+            {
+                var endQuote = command.IndexOf('"', 1);
+                if (endQuote > 0)
+                {
+                    var exe = command.Substring(1, endQuote - 1);
+                    var args = command.Substring(endQuote + 1).Trim();
+                    return (exe, args);
+                }
+            }
+
+            // Try to find a common executable extension (.exe, .bat, .cmd, .com, .lnk)
+            var m = Regex.Match(command, "^(.+?\\.(exe|bat|cmd|com|lnk))(\\s+.*)?$", RegexOptions.IgnoreCase);
+            if (m.Success)
+            {
+                var exe = m.Groups[1].Value;
+                var args = m.Groups[3].Success ? m.Groups[3].Value.Trim() : string.Empty;
+                return (exe, args);
+            }
+
+            // Fallback: split on first space
+            var idx = command.IndexOf(' ');
+            if (idx > 0)
+            {
+                var exe = command.Substring(0, idx);
+                var args = command.Substring(idx + 1).Trim();
+                return (exe, args);
+            }
+
+            return (command, string.Empty);
         }
 
         private async void LaunchSelectedProgram()
@@ -177,31 +303,102 @@ namespace StartupController
             {
                 await Task.Run(() =>
                 {
-                    string arguments = "";
-                    if (prog.Path.Contains("\""))
+                    var (exePath, arguments) = SplitCommand(prog.Path);
+
+                    if (string.IsNullOrEmpty(exePath))
+                        throw new FileNotFoundException("Executable path could not be determined from entry.");
+
+                    if (!File.Exists(exePath))
                     {
-                        // lets get the path between the quotes
-                        var path = prog.Path.Substring(1, prog.Path.IndexOf("\"", 2) - 1);
-                        arguments = prog.Path.Substring(prog.Path.IndexOf("\"", 2) + 1).Trim();
-                        // Handle paths with quotes
-                        prog.Path = path;
+                        // Try to start using shell (may handle URLs or AppUserModelIDs), but log clearly
+                        LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command.");
+                        var psiShell = new ProcessStartInfo(prog.Path)
+                        {
+                            UseShellExecute = true
+                        };
+                        Process.Start(psiShell);
                     }
-                    var startInfo = new ProcessStartInfo(prog.Path)
+                    else
                     {
-                        UseShellExecute = true,
-                        WorkingDirectory = Path.GetDirectoryName(prog.Path),
-                        Arguments = arguments
-                    };
-                    Process.Start(startInfo);
+                        var startInfo = new ProcessStartInfo(exePath)
+                        {
+                            UseShellExecute = true,
+                            WorkingDirectory = Path.GetDirectoryName(exePath),
+                            Arguments = arguments
+                        };
+                        Process.Start(startInfo);
+                    }
                 });
-                ShowStartupNotification("Launched: " + prog.Name);
+
+                ShowNotification("Launched: " + prog.Name);
+                LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
+            }
+            catch (FileNotFoundException fnf)
+            {
+                LoggingService.LogLaunchResult(prog.Name, prog.Path, false, fnf.Message);
+                ShowNotification($"Executable not found: {fnf.Message}");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to launch: {ex.Message}");
+                LoggingService.LogLaunchResult(prog.Name, prog.Path, false, ex.Message);
+                ShowNotification($"Failed to launch: {ex.Message}");
             }
         }
 
+        public async Task LaunchEnabledProgramsAsync()
+        {
+            if (!this.LaunchFromStartup) return;
+            var enabledPrograms = startupPrograms.Where(p => p.Enabled).ToList();
+            int total = enabledPrograms.Count;
+            int current = 1;
+
+            foreach (var prog in enabledPrograms)
+            {
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        var (exePath, arguments) = SplitCommand(prog.Path);
+
+                        if (string.IsNullOrEmpty(exePath))
+                            throw new FileNotFoundException("Executable path could not be determined from entry.");
+
+                        if (!File.Exists(exePath))
+                        {
+                            LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command.");
+                            var psiShell = new ProcessStartInfo(prog.Path)
+                            {
+                                UseShellExecute = true
+                            };
+                            Process.Start(psiShell);
+                        }
+                        else
+                        {
+                            var startInfo = new ProcessStartInfo(exePath)
+                            {
+                                UseShellExecute = true,
+                                WorkingDirectory = Path.GetDirectoryName(exePath),
+                                Arguments = arguments
+                            };
+                            Process.Start(startInfo);
+                        }
+                    });
+
+                    ShowStartupNotification(prog.Name, current, total);
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
+                }
+                catch (FileNotFoundException fnf)
+                {
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, fnf.Message);
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, ex.Message);
+                    ShowNotification($"Failed to launch {prog.Name}: {ex.Message}");
+                }
+                current++;
+            }
+        }
         private void MoveSelectedProgram(int direction)
         {
             if (listViewStartup.SelectedItems.Count == 0) return;
@@ -218,7 +415,8 @@ namespace StartupController
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to move program: {ex.Message}");
+                LoggingService.LogError("Failed to move program", ex);
+                ShowNotification($"Failed to move program: {ex.Message}");
             }
         }
         private async Task SaveOrderAsync()
@@ -231,11 +429,13 @@ namespace StartupController
                     StartupRegistryService registryService = new StartupRegistryService();
                     registryService.SaveStartupOrder(startupPrograms.Where(p => p.Enabled).Select(p => p.Name).ToList());
                 });
-                ShowStartupNotification("Order saved!");
+                ShowNotification("Order saved!");
+                LoggingService.LogInfo("Order saved");
             }
             catch (Exception ex)
             {
-                ShowStartupNotification($"Failed to save order: {ex.Message}");
+                ShowNotification($"Failed to save order: {ex.Message}");
+                LoggingService.LogError("Failed to save order", ex);
             }
         }
         private void ShowHelp()
@@ -244,10 +444,10 @@ namespace StartupController
         }
         public void ShowStartupNotification(string programName, int current, int total)
         {
-            ShowStartupNotification($"Starting {programName} ({current} of {total})");
+            ShowNotification($"Starting {programName} ({current} of {total})");
         }
 
-        private void ShowStartupNotification(string text)
+        private void ShowNotification(string text)
         {
             if (UserSettingsService.GetSilenceNotifications()) return; // Check your setting
             notifyIcon.BalloonTipTitle = "Startup Controller";
@@ -262,44 +462,6 @@ namespace StartupController
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
-            }
-        }
-
-        public async Task LaunchEnabledProgramsAsync()
-        {
-            if(!this.LaunchFromStartup) return; 
-            var enabledPrograms = startupPrograms.Where(p => p.Enabled).ToList();
-            int total = enabledPrograms.Count;
-            int current = 1;
-
-            foreach (var prog in enabledPrograms)
-            {
-                try
-                {
-                    await Task.Run(() =>
-                    {
-                        string arguments = "";
-                        string path = prog.Path;
-                        if (path.Contains("\""))
-                        {
-                            path = path.Substring(1, path.IndexOf("\"", 2) - 1);
-                            arguments = prog.Path.Substring(prog.Path.IndexOf("\"", 2) + 1).Trim();
-                        }
-                        var startInfo = new ProcessStartInfo(path)
-                        {
-                            UseShellExecute = true,
-                            WorkingDirectory = Path.GetDirectoryName(path),
-                            Arguments = arguments
-                        };
-                        Process.Start(startInfo);
-                    });
-                    ShowStartupNotification(prog.Name, current, total);
-                }
-                catch (Exception ex)
-                {
-                    ShowStartupNotification($"Failed to launch {prog.Name}: {ex.Message}");
-                }
-                current++;
             }
         }
     }
