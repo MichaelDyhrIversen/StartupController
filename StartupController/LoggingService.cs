@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace StartupController
 {
@@ -65,7 +66,10 @@ namespace StartupController
 
         public static void StartSession(string? args = null)
         {
-            var header = "=== New session started: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + (string.IsNullOrEmpty(args) ? "" : " | args: " + args) + " ===";
+            var asmVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0.0";
+            var header = "=== New session started: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                       + " | version: " + asmVersion
+                       + (string.IsNullOrEmpty(args) ? "" : " | args: " + args) + " ===";
             AppendLine("SESSION", "App", header);
         }
 

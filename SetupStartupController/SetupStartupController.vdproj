@@ -209,15 +209,15 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:StartupController"
-        "ProductCode" = "8:{49CF171A-F300-4332-8554-65472E4D84BB}"
-        "PackageCode" = "8:{D64033D6-CE81-4B63-9B83-3AE63FF96471}"
+        "ProductCode" = "8:{F42938F2-892A-49F7-A747-B47FC7BFF99F}"
+        "PackageCode" = "8:{E83CE2C7-D743-4300-8AD6-2D8AF1C3BC60}"
         "UpgradeCode" = "8:{E07E5FE3-DAA3-4BDC-88E1-2DBAC1283197}"
         "AspNetVersion" = "8:4.0.30319.0"
         "RestartWWWService" = "11:FALSE"
         "RemovePreviousVersions" = "11:TRUE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.0.2"
+        "ProductVersion" = "8:1.0.19"
         "Manufacturer" = "8:QCompany"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"
@@ -802,3 +802,7 @@
         }
     }
 }
+
+
+
+

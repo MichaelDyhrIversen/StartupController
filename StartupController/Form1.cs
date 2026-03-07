@@ -311,11 +311,12 @@ namespace StartupController
                     if (!File.Exists(exePath))
                     {
                         // Try to start using shell (may handle URLs or AppUserModelIDs), but log clearly
-                        LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command.");
+                        LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command: {prog.Path}");
                         var psiShell = new ProcessStartInfo(prog.Path)
                         {
                             UseShellExecute = true
                         };
+                        LoggingService.LogInfo($"Shell start: Command='{prog.Path}'");
                         Process.Start(psiShell);
                     }
                     else
@@ -326,6 +327,7 @@ namespace StartupController
                             WorkingDirectory = Path.GetDirectoryName(exePath),
                             Arguments = arguments
                         };
+                        LoggingService.LogInfo($"Process start: Exe='{startInfo.FileName}' Args='{startInfo.Arguments}' WorkingDir='{startInfo.WorkingDirectory}'");
                         Process.Start(startInfo);
                     }
                 });
@@ -365,11 +367,13 @@ namespace StartupController
 
                         if (!File.Exists(exePath))
                         {
-                            LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command.");
+                            // Try to start using shell (may handle URLs or AppUserModelIDs), but log clearly
+                            LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command: {prog.Path}");
                             var psiShell = new ProcessStartInfo(prog.Path)
                             {
                                 UseShellExecute = true
                             };
+                            LoggingService.LogInfo($"Shell start: Command='{prog.Path}'");
                             Process.Start(psiShell);
                         }
                         else
@@ -380,6 +384,7 @@ namespace StartupController
                                 WorkingDirectory = Path.GetDirectoryName(exePath),
                                 Arguments = arguments
                             };
+                            LoggingService.LogInfo($"Process start: Exe='{startInfo.FileName}' Args='{startInfo.Arguments}' WorkingDir='{startInfo.WorkingDirectory}'");
                             Process.Start(startInfo);
                         }
                     });
