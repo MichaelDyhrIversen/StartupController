@@ -49,13 +49,13 @@
     </None>
   </ItemGroup>
 
-	<!-- NEW: increment build number before compile -->
+	<!-- NEW: increment build number before compile 
 	<Target Name="IncrementBuildNumber" BeforeTargets="BeforeCompile">
 		<Exec Command="powershell -ExecutionPolicy Bypass -NoProfile -File &quot;$(SolutionDir)tools\Increment-BuildVersion.ps1&quot; -BuildNumberFile &quot;$(SolutionDir)tools\buildnumber.txt&quot; -OutputDir &quot;$(ProjectDir)Properties&quot; -Major 1 -Minor 0" />
 	</Target>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec Command="powershell -ExecutionPolicy Bypass -NoProfile -File &quot;$(SolutionDir)tools\Update-VdprojVersion.ps1&quot; -VdprojPath &quot;$(SolutionDir)SetupStartupController\SetupStartupController.vdproj&quot; -AssemblyPath &quot;$(TargetPath)&quot; -UpdateProductCode" />
-  </Target>
+  </Target>-->
 
 </Project>

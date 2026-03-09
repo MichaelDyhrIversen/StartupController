@@ -11,7 +11,9 @@
         private System.Windows.Forms.Button btnDisable;
         private System.Windows.Forms.Button btnLaunch;
         private System.Windows.Forms.Button btnMoveUp;
+        private System.Windows.Forms.Button btnMoveTop;
         private System.Windows.Forms.Button btnMoveDown;
+        private System.Windows.Forms.Button btnMoveBottom;
         private System.Windows.Forms.Button btnSaveOrder;
         private System.Windows.Forms.Button btnViewLogs;
         private System.Windows.Forms.Button btnHelp;
@@ -23,6 +25,7 @@
         private System.Windows.Forms.ColumnHeader columnHeaderEnabled;
         private System.Windows.Forms.ColumnHeader columnHeaderPath;
         private System.Windows.Forms.ColumnHeader columnHeaderDescription;
+        private System.Windows.Forms.CheckBox chkAutoSaveOnChange;
 
         /// <summary>
         ///  Clean up any resources being used.
@@ -52,7 +55,9 @@
             btnDisable = new Button();
             btnLaunch = new Button();
             btnMoveUp = new Button();
+            btnMoveTop = new Button();
             btnMoveDown = new Button();
+            btnMoveBottom = new Button();
             btnSaveOrder = new Button();
             btnViewLogs = new Button();
             btnHelp = new Button();
@@ -60,6 +65,7 @@
             notifyIcon = new NotifyIcon(components);
             chkLaunchProgramsOnStartup = new CheckBox();
             chkLaunchToTray = new CheckBox();
+            chkAutoSaveOnChange = new CheckBox();
             SuspendLayout();
             // 
             // listViewStartup Columns
@@ -90,7 +96,7 @@
             listViewStartup.FullRowSelect = true;
             listViewStartup.Location = new Point(12, 12);
             listViewStartup.Name = "listViewStartup";
-            listViewStartup.Size = new Size(630, 300);
+            listViewStartup.Size = new Size(630, 320);
             listViewStartup.TabIndex = 0;
             listViewStartup.UseCompatibleStateImageBehavior = false;
             listViewStartup.View = View.Details;
@@ -126,30 +132,46 @@
             btnLaunch.Text = "Launch";
             btnLaunch.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
-            // btnMoveUp
+            // Move buttons (paired layout)
             // 
+            // Top pair: Move up (single arrow) on the left, Move to top (double arrow) on the right
+            // Use compact widths so the pair fits where the previous single button was
             btnMoveUp.Location = new Point(660, 132);
             btnMoveUp.Name = "btnMoveUp";
-            btnMoveUp.Size = new Size(120, 32);
+            btnMoveUp.Size = new Size(58, 32);
             btnMoveUp.TabIndex = 4;
-            btnMoveUp.Text = "Move Up";
+            btnMoveUp.Text = "↑";
             btnMoveUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
+            btnMoveTop.Location = new Point(722, 132);
+            btnMoveTop.Name = "btnMoveTop";
+            btnMoveTop.Size = new Size(58, 32);
+            btnMoveTop.TabIndex = 5;
+            btnMoveTop.Text = "⇈"; // double arrow up
+            btnMoveTop.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
-            // btnMoveDown
+            // Bottom pair: Move down (single arrow) on the left, Move to bottom (double arrow) on the right
             // 
             btnMoveDown.Location = new Point(660, 172);
             btnMoveDown.Name = "btnMoveDown";
-            btnMoveDown.Size = new Size(120, 32);
-            btnMoveDown.TabIndex = 5;
-            btnMoveDown.Text = "Move Down";
+            btnMoveDown.Size = new Size(58, 32);
+            btnMoveDown.TabIndex = 6;
+            btnMoveDown.Text = "↓";
             btnMoveDown.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
+            btnMoveBottom.Location = new Point(722, 172);
+            btnMoveBottom.Name = "btnMoveBottom";
+            btnMoveBottom.Size = new Size(58, 32);
+            btnMoveBottom.TabIndex = 7;
+            btnMoveBottom.Text = "⇊"; // double arrow down
+            btnMoveBottom.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // btnSaveOrder
             // 
             btnSaveOrder.Location = new Point(660, 212);
             btnSaveOrder.Name = "btnSaveOrder";
             btnSaveOrder.Size = new Size(120, 32);
-            btnSaveOrder.TabIndex = 6;
+            btnSaveOrder.TabIndex = 8;
             btnSaveOrder.Text = "Save Order";
             btnSaveOrder.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
@@ -158,7 +180,7 @@
             btnViewLogs.Location = new Point(660, 252);
             btnViewLogs.Name = "btnViewLogs";
             btnViewLogs.Size = new Size(120, 32);
-            btnViewLogs.TabIndex = 7;
+            btnViewLogs.TabIndex = 9;
             btnViewLogs.Text = "View Logs";
             btnViewLogs.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
@@ -167,17 +189,17 @@
             btnHelp.Location = new Point(660, 292);
             btnHelp.Name = "btnHelp";
             btnHelp.Size = new Size(120, 32);
-            btnHelp.TabIndex = 8;
+            btnHelp.TabIndex = 10;
             btnHelp.Text = "Help";
             btnHelp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             // 
             // chkSilenceNotifications
             // 
             chkSilenceNotifications.AutoSize = true;
-            chkSilenceNotifications.Location = new Point(12, 320);
+            chkSilenceNotifications.Location = new Point(12, 340);
             chkSilenceNotifications.Name = "chkSilenceNotifications";
             chkSilenceNotifications.Size = new Size(134, 19);
-            chkSilenceNotifications.TabIndex = 9;
+            chkSilenceNotifications.TabIndex = 11;
             chkSilenceNotifications.Text = "Silence Notifications";
             chkSilenceNotifications.UseVisualStyleBackColor = true;
             // keep checkboxes anchored to bottom so they stay at the bottom when resizing
@@ -192,7 +214,7 @@
             // chkLaunchProgramsOnStartup
             // 
             chkLaunchProgramsOnStartup.AutoSize = true;
-            chkLaunchProgramsOnStartup.Location = new Point(377, 320);
+            chkLaunchProgramsOnStartup.Location = new Point(377, 340);
             chkLaunchProgramsOnStartup.Name = "chkLaunchProgramsOnStartup";
             chkLaunchProgramsOnStartup.Size = new Size(265, 19);
             chkLaunchProgramsOnStartup.TabIndex = 2;
@@ -203,7 +225,7 @@
             // chkLaunchToTray
             // 
             chkLaunchToTray.AutoSize = true;
-            chkLaunchToTray.Location = new Point(211, 320);
+            chkLaunchToTray.Location = new Point(211, 340);
             chkLaunchToTray.Name = "chkLaunchToTray";
             chkLaunchToTray.Size = new Size(106, 19);
             chkLaunchToTray.TabIndex = 2;
@@ -211,26 +233,40 @@
             chkLaunchToTray.UseVisualStyleBackColor = true;
             chkLaunchToTray.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             // 
+            // chkAutoSaveOnChange
+            // 
+            chkAutoSaveOnChange.AutoSize = true;
+            chkAutoSaveOnChange.Location = new Point(648, 340); // move to bottom row with other checkboxes
+            chkAutoSaveOnChange.Name = "chkAutoSaveOnChange";
+            chkAutoSaveOnChange.Size = new Size(130, 19);
+            chkAutoSaveOnChange.TabIndex = 12;
+            chkAutoSaveOnChange.Text = "Autosave on change";
+            chkAutoSaveOnChange.UseVisualStyleBackColor = true;
+            chkAutoSaveOnChange.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(800, 360);
             // allow the form to be resized
-            this.MinimumSize = new Size(816, 399);
+            this.MinimumSize = new Size(816, 409);
             this.AutoScaleMode = AutoScaleMode.Font;
             Controls.Add(listViewStartup);
             Controls.Add(btnEnable);
             Controls.Add(btnDisable);
             Controls.Add(btnLaunch);
             Controls.Add(btnMoveUp);
+            Controls.Add(btnMoveTop);
             Controls.Add(btnMoveDown);
+            Controls.Add(btnMoveBottom);
             Controls.Add(btnSaveOrder);
             Controls.Add(btnViewLogs);
             Controls.Add(btnHelp);
             Controls.Add(chkSilenceNotifications);
             Controls.Add(chkLaunchProgramsOnStartup);
             Controls.Add(chkLaunchToTray);
+            Controls.Add(chkAutoSaveOnChange);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "Form1";
             StartPosition = FormStartPosition.CenterScreen;
@@ -244,6 +280,5 @@
 
 
 
-        
     }
 }

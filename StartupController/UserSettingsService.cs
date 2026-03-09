@@ -8,6 +8,7 @@ namespace StartupController
         private const string SILENCE_NOTIFICATIONS = "SilenceNotifications";
         private const string START_TO_TRAY = "StartToTray";
         private const string LAUNCH_PROGRAMS_ON_STARTUP = "LaunchProgramsOnStartup"; 
+        private const string AUTOSAVE_ON_CHANGE = "AutoSaveOnChange";
 
         public static bool GetSilenceNotifications()
         {
@@ -45,6 +46,19 @@ namespace StartupController
         {
             using var key = Registry.CurrentUser.CreateSubKey(SETTINGS_KEY);
             key?.SetValue(LAUNCH_PROGRAMS_ON_STARTUP, value ? 1 : 0, RegistryValueKind.DWord);
+        }
+
+        // --- Auto-save on change setting ---
+        public static bool GetAutoSaveOnChange()
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SETTINGS_KEY, false);
+            return key?.GetValue(AUTOSAVE_ON_CHANGE, 0) is int v && v == 1;
+        }
+
+        public static void SetAutoSaveOnChange(bool value)
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SETTINGS_KEY);
+            key?.SetValue(AUTOSAVE_ON_CHANGE, value ? 1 : 0, RegistryValueKind.DWord);
         }
     }
 }

@@ -9,6 +9,8 @@ namespace StartupController
     public partial class Form1 : Form
     {
         public bool LaunchFromStartup = false;
+        private bool isDirty = false;
+
         public Form1()
         {
             InitializeComponent();
@@ -16,7 +18,9 @@ namespace StartupController
             btnDisable.Click += (s, e) => DisableSelectedProgram();
             btnLaunch.Click += (s, e) => LaunchSelectedProgram();
             btnMoveUp.Click += (s, e) => MoveSelectedProgram(-1);
+            btnMoveTop.Click += (s, e) => MoveSelectedProgramToTop();
             btnMoveDown.Click += (s, e) => MoveSelectedProgram(1);
+            btnMoveBottom.Click += (s, e) => MoveSelectedProgramToBottom();
             btnSaveOrder.Click += async (s, e) => await SaveOrderAsync();
             btnHelp.Click += (s, e) => ShowHelp();
             listViewStartup.DoubleClick += (s, e) => ToggleSelectedProgram();
@@ -82,6 +86,14 @@ namespace StartupController
                     registryService.RemoveThisApplicationFromStartup();
                 }
             };
+
+            // autosave checkbox
+            chkAutoSaveOnChange.Checked = UserSettingsService.GetAutoSaveOnChange();
+            chkAutoSaveOnChange.CheckedChanged += (s, e) =>
+            {
+                UserSettingsService.SetAutoSaveOnChange(chkAutoSaveOnChange.Checked);
+            };
+
             this.Load += async (s, e) =>
             {
                 LoggingService.StartSession(string.Join(' ', Environment.GetCommandLineArgs()));
@@ -94,8 +106,65 @@ namespace StartupController
                 }
             };
 
+            // handle closing to prompt for unsaved changes
+            this.FormClosing += async (s, e) =>
+            {
+                if (isDirty)
+                {
+                    var res = MessageBox.Show("There are unsaved changes. Save before exiting?", "Unsaved Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+                    if (res == DialogResult.Cancel)
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                    if (res == DialogResult.Yes)
+                    {
+                        await SaveOrderAsync();
+                        // If still dirty after save, cancel closing
+                        if (isDirty)
+                            e.Cancel = true;
+                    }
+                }
+            };
+
             // initial column sizing
             AdjustListViewColumns();
+        }
+
+        private void SetDirty(bool dirty)
+        {
+            // If autosave is enabled and we are marking dirty, perform immediate save instead of keeping dirty state
+            try
+            {
+                if (dirty && UserSettingsService.GetAutoSaveOnChange())
+                {
+                    // trigger save in background and do not set isDirty
+                    _ = SaveOrderAsync();
+                    return;
+                }
+
+                isDirty = dirty;
+
+                // visual cue on save button unless autosave is enabled
+                if (isDirty)
+                {
+                    btnSaveOrder.Enabled = true;
+                    if (!UserSettingsService.GetAutoSaveOnChange())
+                    {
+                        btnSaveOrder.BackColor = System.Drawing.Color.LightSalmon;
+                    }
+                    else
+                    {
+                        btnSaveOrder.BackColor = btnDisable.BackColor;
+                    }
+                }
+                else
+                {
+                    btnSaveOrder.Enabled = true; // still enabled so user can save if they want
+                    btnSaveOrder.BackColor = btnDisable.BackColor;
+                }
+            }
+            catch { }
         }
 
         private List<StartupProgram> startupPrograms = new List<StartupProgram>();
@@ -212,6 +281,7 @@ namespace StartupController
                 // TODO: Update registry or startup folder asynchronously
                 await Task.Run(() => {/* registry update logic here */});
                 RefreshListView();
+                SetDirty(true);
             }
             catch (Exception ex)
             {
@@ -229,6 +299,7 @@ namespace StartupController
                 // TODO: Update registry or startup folder asynchronously
                 await Task.Run(() => {/* registry update logic here */});
                 RefreshListView();
+                SetDirty(true);
             }
             catch (Exception ex)
             {
@@ -246,6 +317,7 @@ namespace StartupController
                 prog.Enabled = false;
                 // TODO: Update registry or startup folder
                 RefreshListView();
+                SetDirty(true);
             }
             catch (Exception ex)
             {
@@ -390,7 +462,7 @@ namespace StartupController
                     });
 
                     ShowStartupNotification(prog.Name, current, total);
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
+                    //LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
                 }
                 catch (FileNotFoundException fnf)
                 {
@@ -417,6 +489,7 @@ namespace StartupController
                 startupPrograms.Insert(newIndex, item);
                 RefreshListView();
                 listViewStartup.Items[newIndex].Selected = true;
+                SetDirty(true);
             }
             catch (Exception ex)
             {
@@ -424,6 +497,48 @@ namespace StartupController
                 ShowNotification($"Failed to move program: {ex.Message}");
             }
         }
+        private void MoveSelectedProgramToTop()
+        {
+            if (listViewStartup.SelectedItems.Count == 0) return;
+            try
+            {
+                int index = listViewStartup.SelectedItems[0].Index;
+                if (index <= 0) return; // already at top
+                var item = startupPrograms[index];
+                startupPrograms.RemoveAt(index);
+                startupPrograms.Insert(0, item);
+                RefreshListView();
+                listViewStartup.Items[0].Selected = true;
+                SetDirty(true);
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogError("Failed to move program to top", ex);
+                ShowNotification($"Failed to move program to top: {ex.Message}");
+            }
+        }
+
+        private void MoveSelectedProgramToBottom()
+        {
+            if (listViewStartup.SelectedItems.Count == 0) return;
+            try
+            {
+                int index = listViewStartup.SelectedItems[0].Index;
+                if (index >= startupPrograms.Count - 1) return; // already at bottom
+                var item = startupPrograms[index];
+                startupPrograms.RemoveAt(index);
+                startupPrograms.Add(item);
+                RefreshListView();
+                listViewStartup.Items[startupPrograms.Count - 1].Selected = true;
+                SetDirty(true);
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogError("Failed to move program to bottom", ex);
+                ShowNotification($"Failed to move program to bottom: {ex.Message}");
+            }
+        }
+
         private async Task SaveOrderAsync()
         {
             try
@@ -436,6 +551,7 @@ namespace StartupController
                 });
                 ShowNotification("Order saved!");
                 LoggingService.LogInfo("Order saved");
+                SetDirty(false);
             }
             catch (Exception ex)
             {
