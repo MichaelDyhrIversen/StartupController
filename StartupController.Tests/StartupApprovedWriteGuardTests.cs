@@ -101,7 +101,7 @@ namespace StartupController.Tests
             var approvedBefore = Dump(RegistrySandbox.ApprovedPath);
 
             var service = new StartupRegistryService(_sandbox.Root);
-            var starter = new FakeProcessStarter();
+            var starter = FakeProcessStarter.AllExesExist();
             var launcher = new ProgramLauncher(starter);
             for (int cycle = 0; cycle < 3; cycle++)
             {

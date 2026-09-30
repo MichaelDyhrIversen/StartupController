@@ -284,6 +284,59 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 **Registry impact:** writes HKCU `Run\StartupController` (existing behaviour), and now creates the Run key if it's missing. No admin.
 **Tests (sandbox):** the Run key is missing → Add creates it and the value is `"<path>" --launch`; Remove when the value is missing → no throw; the settings root is read-only (open the sandbox key without write access) → `Set*` throws and the handler logic (in the model) reverts the state.
 
+### Phase 3 implementation notes (developer, 2026-10-01)
+- 3.1 parser, first version (superseded): unquoted input was resolved longest existing prefix first. **Superseded by the review round below (security M1).**
+- 3.1 parser, current: unquoted input is scanned **shortest first**, and the first prefix with an executable extension (.exe .com .bat .cmd .lnk, ignoring trailing dots and spaces) is the exe, whether or not it exists; a missing one is NotFound. Nothing else is probed. The `.exe` probe applies only to the whole string, and only when no token has an executable extension. Consequences:
+  - An unquoted path whose directory name contains an executable extension (`C:\My.exe Tools\app.exe`) resolves to the first token; quote it to run the longer path.
+  - An extensionless unquoted exe followed by arguments (`C:\App\tool -q`) is not resolved; it gives NotFound.
+  - Probes are capped at 32 per command.
+  - An unmatched quote with no executable token keeps the whole rest as the exe.
+- 3.1 no double expansion: `StartupProgram.PathExpanded` (true for REG_EXPAND_SZ, set in `GetStartupPrograms`) tells the launcher that `Path` is already expanded. Fingerprints are unchanged.
+- 3.1 shell fallback: a missing exe is shell-started (parsed exe + args) **only when it is a bare file name without spaces** (e.g. `rundll32.exe`). A missing path with a directory part returns NotFound, and nothing is started. URL- or AppUserModelID-style commands are no longer shell-started (fail closed).
+- 3.1 / 3.1a: logging and notifications are in the new `LaunchRunner` (used by the Launch button and `--launch`). There is a new `IMessageDialog` seam for the blocked-entry MessageBox. Blocked entries get no `LAUNCH` log line, because that line contains the command.
+- 3.1a extra: an extensionless `StartupController` (a bare name the shell could resolve through App Paths) is also blocked. The optional "Blocked (StartupController)" status in the list is not implemented.
+- 3.2: `Form1.SetVisibleCore` suppresses the first show and posts the startup work, because Load is raised only by a real show. `InstanceActivation` (`Local\StartupControllerActivate`) restores the window. A second instance started with `--launch` exits without signalling, so a login-time launch doesn't pop up the window of an instance the user already opened.
+- 3.3: the checkbox logic is in `SettingsController`. If the setting write fails after the Run entry was written, the Run change is undone (best effort). `AppRegistryPaths` holds only the Run and app key paths; the `StartupApproved` path stays private to `StartupRegistryService` (source-scan guard).
+- Left for Phase 4: `async Task Main` (item 17), the unused usings and `Form_Load`.
+
+#### Phase 3 review fixes (developer, 2026-10-01)
+- M1: shortest-first parsing, as described above. The tester's two longest-first pins were flipped and renamed: `Unquoted_LongestFirst_PicksACombinedNameWhenSuchAFileExists` and `DotExeInDirectory_WithSpaces_LongestWins`. The second also pinned longest-first; keeping it would have re-opened M1.
+- Direct start: an existing, fully qualified `.exe` or `.com` starts with `UseShellExecute = false`. It retries through the shell only on `Win32Exception` 740 (elevation required). `.bat`, `.cmd`, `.lnk` and bare names still use the shell.
+- L1: `FileExists` is called only for fully qualified paths. A bare name goes straight to the shell branch. Any other relative form (`sub\x`, `..\x`, `C:x`, `\x`) returns NotFound.
+- Self guard:
+  - File names are compared after trimming trailing dots and spaces, and `.exe` is never appended to a name that ends in a dot.
+  - `\\?\`, `\\?\UNC\` and `\\.\` prefixes are stripped before comparing.
+  - A bare name is also checked as if it sat in `AppContext.BaseDirectory`.
+  - A file-identity check (volume serial plus file index) runs when both files exist. It fails safe if it throws.
+  - After the self check, a resolved exe with a `:` after the drive position (alternate data stream) or a trailing dot or space is rejected as a failure.
+- Bounds: a command longer than 32767 characters, raw or after expansion, is a failure, logged by name only.
+- IPC:
+  - The activation is created before `Form1`, and a failure to create it is logged and the app continues without it.
+  - `ActivationRelay` keeps a request that arrives before the form exists.
+  - A request that arrives before the window handle exists is honoured in `Form1.OnHandleCreated`, the equivalent of honouring it in SetVisibleCore or Load.
+  - Repeats within 1.5 s are ignored, logged at most once per interval.
+  - `SignalExisting` also catches `IOException` and `ArgumentException`.
+- Code inspector:
+  - `LaunchRunner.FailureMessage`, and an `INotifier.SafeNotify` extension used everywhere.
+  - The Launch button ignores clicks and is disabled while a launch runs.
+  - The startup mode (launch mode and start hidden) is read once and cached.
+- `--launch` hang: each launch has a 30 s timeout. When it runs out, the entry is logged as a failure and the sequence continues.
+
+#### Security re-review follow-ups (developer, 2026-10-01)
+- L-A:
+  - `Program.Main` sets the current directory to `Environment.SystemDirectory` first.
+  - The bare-name shell start sets `WorkingDirectory = Environment.SystemDirectory`, so the directory the app was started from is never searched.
+- L-B:
+  - The activation event must be newly created (the `createdNew` overload). If it already exists, the handle is disposed, `ActivationEventExistsException` (an `IOException`) is thrown, and `Program.CreateActivation` logs a Warning and runs without activation.
+  - The listener also calls `Reset()` after each wake.
+- L-C:
+  - The fallback splits off arguments only after a bare first token. Otherwise the whole command is the exe, so it ends up NotFound: `D:\Apps v2\tool` never becomes a planted `D:\Apps`.
+- L-D:
+  - Manual launches have no timeout; the Launch button stays disabled until the launch really finishes. `--launch` keeps the 30 s timeout.
+  - A launch that completes after its timeout is logged by name only: started, failed or blocked.
+- I-2: for extensionless paths, `<path>.exe` is probed before `<path>` (CreateProcess order).
+- I-5: a failure to create the singleton mutex is logged and the app exits cleanly.
+
 ---
 
 ## Phase 4: Low / cleanup

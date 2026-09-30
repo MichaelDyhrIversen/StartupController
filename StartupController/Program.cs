@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 using System.Windows.Forms;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 
@@ -12,77 +11,96 @@ namespace StartupController
         // Unique mutex name for your application
         private const string MutexName = "StartupControllerSingletonMutex";
 
-        // Win32 API for sending a message to bring the window to front
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-        [DllImport("user32.dll")]
-        private static extern bool IsIconic(IntPtr hWnd);
-
-        private const int SW_RESTORE = 9;
-
         [STAThread]
         static async Task Main(string[] args)
         {
-            using (var mutex = new Mutex(true, MutexName, out bool isNewInstance))
+            // Nothing may resolve against the directory the app was started from (e.g. Downloads with a planted
+            // helper.exe): the shell searches the current directory before PATH for bare names
+            try
+            {
+                Directory.SetCurrentDirectory(Environment.SystemDirectory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                LoggingService.LogError("Could not set the current directory to the system directory", ex);
+            }
+
+            Mutex mutex;
+            bool isNewInstance;
+            try
+            {
+                mutex = new Mutex(true, MutexName, out isNewInstance);
+            }
+            catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
+            {
+                // The name is taken by another kind of object or one we can't open: exit instead of crashing
+                LoggingService.LogError("Single-instance mutex is unavailable; exiting", ex);
+                return;
+            }
+
+            using (mutex)
             {
                 if (isNewInstance)
                 {
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    var settings = new UserSettings(Registry.CurrentUser);
-                    bool startMinimized = settings.GetStartToTray();
-                    var form = new Form1(settings, new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()));
-                    if (startMinimized)
+                    // Listen for a second instance before the form exists; early requests wait in the relay
+                    var relay = new ActivationRelay();
+                    var activation = CreateActivation(relay);
+                    try
                     {
-                        form.WindowState = FormWindowState.Minimized;
-                        form.ShowInTaskbar = false;
-                        form.Load += (s, e) => form.Hide();
-                    }
-                    if (args.Contains("--launch"))
-                    {
-                        form.LaunchFromStartup = true;
-                    }
-                    Application.Run(form);
+                        var settings = new UserSettings(Registry.CurrentUser);
+                        var form = new Form1(settings, new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()));
+                        // Startup visibility (tray, --launch) is decided in Form1.SetVisibleCore
+                        if (args.Contains("--launch"))
+                        {
+                            form.LaunchFromStartup = true;
+                        }
 
+                        relay.Attach(form.RequestRestore);
+                        Application.Run(form);
+                    }
+                    finally
+                    {
+                        activation?.Dispose();
+                    }
                 }
-                else
+                else if (args.Contains("--launch"))
                 {
-                    // Try to bring the existing instance to the foreground
-                    BringExistingInstanceToFront();
+                    // Started from the Run key while the app is already open: don't launch twice or pop up the window
+                    LoggingService.LogInfo("Second instance with --launch; exiting without launching");
+                }
+                else if (!InstanceActivation.SignalExisting(InstanceActivation.DefaultEventName))
+                {
+                    LoggingService.LogWarning("Second instance could not signal the running instance");
                 }
             }
 
+        }
+
+        // The app works without activation (a second launch then just exits), so a failure is logged, not fatal
+        private static InstanceActivation? CreateActivation(ActivationRelay relay)
+        {
+            try
+            {
+                return new InstanceActivation(InstanceActivation.DefaultEventName, relay.Request);
+            }
+            catch (ActivationEventExistsException ex)
+            {
+                // We hold the singleton mutex, so someone else created this event (possibly with the wrong reset mode)
+                LoggingService.LogWarning("Single-instance activation is unavailable: " + ex.Message);
+                return null;
+            }
+            catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
+            {
+                LoggingService.LogError("Single-instance activation is unavailable", ex);
+                return null;
+            }
         }
 
         private static void Form_Load(object? sender, EventArgs e)
         {
             throw new NotImplementedException();
-        }
-
-        private static void BringExistingInstanceToFront()
-        {
-            // Find the window by title (ensure your main window title is unique)
-            var processes = System.Diagnostics.Process.GetProcessesByName(
-                System.Diagnostics.Process.GetCurrentProcess().ProcessName);
-
-            foreach (var process in processes)
-            {
-                if (process.Id != System.Diagnostics.Process.GetCurrentProcess().Id)
-                {
-                    IntPtr hWnd = process.MainWindowHandle;
-                    if (hWnd != IntPtr.Zero)
-                    {
-                        if (IsIconic(hWnd))
-                            ShowWindow(hWnd, SW_RESTORE);
-                        SetForegroundWindow(hWnd);
-                    }
-                    break;
-                }
-            }
         }
     }
 }

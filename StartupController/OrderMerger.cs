@@ -138,7 +138,8 @@ namespace StartupController
             Path = program.Path,
             Enabled = false,
             Description = program.Description,
-            Fingerprint = program.Fingerprint
+            Fingerprint = program.Fingerprint,
+            PathExpanded = program.PathExpanded
         };
     }
 }

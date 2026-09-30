@@ -9,7 +9,7 @@ namespace StartupController.Tests
     public class ProgramLauncherTests
     {
         [Fact]
-        public void ExistingExe_StartsOnce_WithExeArgsAndWorkingDirectory()
+        public void ExistingExe_StartsOnce_WithExeArgsAndWorkingDirectory_WithoutTheShell()
         {
             var starter = new FakeProcessStarter(@"C:\Apps\x.exe");
             var launcher = new ProgramLauncher(starter);
@@ -21,23 +21,72 @@ namespace StartupController.Tests
             Assert.Equal(@"C:\Apps\x.exe", psi.FileName);
             Assert.Equal("--minimized", psi.Arguments);
             Assert.Equal(@"C:\Apps", psi.WorkingDirectory);
-            Assert.True(psi.UseShellExecute);
+            Assert.False(psi.UseShellExecute); // an existing .exe is started directly (item 2)
         }
 
         [Fact]
-        public void MissingExe_ShellStartsTheRawCommand_Current() // 3.1 changes this to the parsed exe + args
+        public void MissingExeWithDirectory_IsNotFound_AndNeverShellStarted() // was MissingExe_ShellStartsTheRawCommand_Current
         {
             var starter = new FakeProcessStarter();
             var launcher = new ProgramLauncher(starter);
 
             var result = launcher.Launch(P("X", path: @"C:\Missing\x.exe --flag"));
 
+            Assert.False(result.Success);
+            Assert.True(result.NotFound);
+            Assert.Contains(@"C:\Missing\x.exe", result.Error);
+            Assert.Empty(starter.Started);
+        }
+
+        [Fact]
+        public void MissingBareExe_ShellStartsTheParsedExeAndArgs_NotTheRawString()
+        {
+            var starter = new FakeProcessStarter();
+            var launcher = new ProgramLauncher(starter);
+
+            var result = launcher.Launch(P("R", path: "rundll32.exe shell32.dll,Foo"));
+
             Assert.True(result.Success);
             var psi = Assert.Single(starter.Started);
-            Assert.Equal(@"C:\Missing\x.exe --flag", psi.FileName);
-            Assert.Equal("", psi.Arguments);
+            Assert.Equal("rundll32.exe", psi.FileName);
+            Assert.Equal("shell32.dll,Foo", psi.Arguments);
             Assert.True(psi.UseShellExecute);
-            Assert.Equal(@"C:\Missing\x.exe", Assert.Single(starter.FileExistsCalls));
+        }
+
+        [Fact]
+        public void UnquotedPathWithSpaces_NothingExists_StartsNothing()
+        {
+            // Shell-starting the first token (C:\Program) could run C:\Program.exe
+            var starter = new FakeProcessStarter();
+
+            var result = new ProgramLauncher(starter).Launch(P("X", path: @"C:\Program Files\x.exe -y"));
+
+            Assert.True(result.NotFound);
+            Assert.Empty(starter.Started);
+        }
+
+        [Fact]
+        public void UnquotedPathWithSpaces_StartsTheLongestExistingPath()
+        {
+            var starter = new FakeProcessStarter(@"C:\Program.exe", @"C:\Program Files\x.exe");
+
+            var result = new ProgramLauncher(starter).Launch(P("X", path: @"C:\Program Files\x.exe -y"));
+
+            Assert.True(result.Success);
+            var psi = Assert.Single(starter.Started);
+            Assert.Equal(@"C:\Program Files\x.exe", psi.FileName);
+            Assert.Equal("-y", psi.Arguments);
+        }
+
+        [Fact]
+        public void UnmatchedQuote_NothingExists_StartsNothing()
+        {
+            var starter = new FakeProcessStarter();
+
+            var result = new ProgramLauncher(starter).Launch(P("X", path: "\"C:\\a b.exe"));
+
+            Assert.True(result.NotFound);
+            Assert.Empty(starter.Started);
         }
 
         [Theory]
@@ -73,7 +122,8 @@ namespace StartupController.Tests
         [Fact]
         public void StarterThrowsFileNotFound_ReturnsNotFound()
         {
-            var starter = new FakeProcessStarter { ThrowOnStart = new FileNotFoundException("gone") };
+            // The file existed when checked but is gone when started
+            var starter = new FakeProcessStarter(@"C:\Missing\x.exe") { ThrowOnStart = new FileNotFoundException("gone") };
             var launcher = new ProgramLauncher(starter);
 
             var result = launcher.Launch(P("X", path: @"C:\Missing\x.exe"));
@@ -84,7 +134,7 @@ namespace StartupController.Tests
         }
 
         [Fact]
-        public void ReturnedHandle_IsNotDisposed_Current() // pinned (#9): 3.1 disposes the Process
+        public void ReturnedHandle_IsDisposed() // was ReturnedHandle_IsNotDisposed_Current (#9)
         {
             var starter = new FakeProcessStarter(@"C:\Apps\x.exe");
             FakeProcessStarter.FakeHandle? handle = null;
@@ -93,7 +143,22 @@ namespace StartupController.Tests
             launcher.Launch(P("X", path: @"C:\Apps\x.exe"));
 
             Assert.NotNull(handle);
-            Assert.False(handle!.Disposed);
+            Assert.True(handle!.Disposed);
+        }
+
+        [Fact]
+        public void StarterReturnsNull_IsStillSuccess()
+        {
+            var launcher = new ProgramLauncher(new NullStarter());
+
+            Assert.True(launcher.Launch(P("X", path: @"C:\Apps\x.exe")).Success);
+        }
+
+        private sealed class NullStarter : IProcessStarter
+        {
+            public IDisposable? Start(System.Diagnostics.ProcessStartInfo psi) => null;
+
+            public bool FileExists(string path) => true;
         }
 
         private sealed class CapturingStarter : IProcessStarter

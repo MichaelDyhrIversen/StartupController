@@ -18,7 +18,7 @@ namespace StartupController
     // Values are cached after the first read; Set writes through and then updates the cache.
     public sealed class UserSettings : IUserSettings
     {
-        private const string SETTINGS_KEY = @"Software\StartupController";
+        private const string SETTINGS_KEY = AppRegistryPaths.AppKey;
         private const string SILENCE_NOTIFICATIONS = "SilenceNotifications";
         private const string START_TO_TRAY = "StartToTray";
         private const string LAUNCH_PROGRAMS_ON_STARTUP = "LaunchProgramsOnStartup";

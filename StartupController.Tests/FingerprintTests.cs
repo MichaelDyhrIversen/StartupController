@@ -52,7 +52,7 @@ namespace StartupController.Tests
         // What --launch mode would hand to the process starter
         private static List<string> Launched(StartupListModel model)
         {
-            var starter = new FakeProcessStarter();
+            var starter = FakeProcessStarter.AllExesExist(); // 3.1: a missing path with a directory is not started
             var launcher = new ProgramLauncher(starter);
             foreach (var program in model.EnabledPrograms())
                 launcher.Launch(program);

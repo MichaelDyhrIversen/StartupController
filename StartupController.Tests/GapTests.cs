@@ -236,7 +236,7 @@ namespace StartupController.Tests
         }
 
         [Fact]
-        public void Launcher_ExeWithoutDirectory_HasEmptyWorkingDirectory()
+        public void Launcher_BareExe_WorkingDirectoryIsTheSystemDirectory() // was Launcher_ExeWithoutDirectory_HasEmptyWorkingDirectory (L-A)
         {
             var starter = new FakeProcessStarter("tool.exe");
 
@@ -245,28 +245,59 @@ namespace StartupController.Tests
             var psi = Assert.Single(starter.Started);
             Assert.Equal("tool.exe", psi.FileName);
             Assert.Equal("/q", psi.Arguments);
-            Assert.Equal("", psi.WorkingDirectory);
+            Assert.Equal(Environment.SystemDirectory, psi.WorkingDirectory);
         }
 
         [Fact]
-        public void Launcher_MissingQuotedExe_ShellStartsRawCommandIncludingQuotes_Current()
+        public void Launcher_MissingQuotedExe_IsNotFound_AndNothingIsShellStarted() // was ..._ShellStartsRawCommandIncludingQuotes_Current
         {
             var starter = new FakeProcessStarter();
 
             var result = new ProgramLauncher(starter).Launch(P("X", path: "\"C:\\No Such\\x.exe\" -y"));
 
-            Assert.True(result.Success);
-            Assert.Equal("\"C:\\No Such\\x.exe\" -y", Assert.Single(starter.Started).FileName);
+            Assert.False(result.Success);
+            Assert.True(result.NotFound);
+            Assert.Empty(starter.Started);
         }
 
         [Fact]
-        public void Launcher_DoesNotExpandEnvironmentVariables_Current() // 3.1 adds expansion
+        public void Launcher_ExpandsEnvironmentVariables() // was Launcher_DoesNotExpandEnvironmentVariables_Current
         {
-            var starter = new FakeProcessStarter();
+            var expanded = Environment.ExpandEnvironmentVariables(@"%LOCALAPPDATA%\x.exe");
+            var starter = new FakeProcessStarter(expanded);
 
             new ProgramLauncher(starter).Launch(P("X", path: @"%LOCALAPPDATA%\x.exe"));
 
-            Assert.Equal(@"%LOCALAPPDATA%\x.exe", Assert.Single(starter.FileExistsCalls));
+            Assert.Equal(expanded, Assert.Single(starter.Started).FileName);
+            Assert.DoesNotContain(starter.FileExistsCalls, c => c.Contains('%'));
+        }
+
+        [Fact]
+        public void Launcher_ExpandStringPath_IsNotExpandedTwice()
+        {
+            // The Path of a REG_EXPAND_SZ value was expanded when read; text that came out of a variable stays literal
+            var starter = new FakeProcessStarter(@"C:\Apps\%LOCALAPPDATA%\x.exe");
+            var program = P("X", path: @"C:\Apps\%LOCALAPPDATA%\x.exe");
+            program.PathExpanded = true;
+
+            var result = new ProgramLauncher(starter).Launch(program);
+
+            Assert.True(result.Success);
+            Assert.Equal(@"C:\Apps\%LOCALAPPDATA%\x.exe", Assert.Single(starter.Started).FileName);
+        }
+
+        [Fact]
+        public void Registry_ExpandStringValue_IsMarkedExpanded_StringValueIsNot()
+        {
+            _sandbox.SeedRunValue("E", @"%LOCALAPPDATA%\e.exe", RegistryValueKind.ExpandString);
+            _sandbox.SeedApproved("E", Approved(0x03));
+            _sandbox.SeedRunValue("S", @"%LOCALAPPDATA%\s.exe", RegistryValueKind.String);
+            _sandbox.SeedApproved("S", Approved(0x03));
+
+            var programs = new StartupRegistryService(_sandbox.Root).GetStartupPrograms();
+
+            Assert.True(programs.Single(p => p.Name == "E").PathExpanded);
+            Assert.False(programs.Single(p => p.Name == "S").PathExpanded);
         }
 
         // --- Model ---

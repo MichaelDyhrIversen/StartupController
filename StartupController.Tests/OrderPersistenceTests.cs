@@ -42,7 +42,7 @@ namespace StartupController.Tests
         // Launches what --launch mode would launch and returns the file names handed to the (fake) starter
         private List<string> LaunchEnabled(StartupListModel model)
         {
-            var starter = new FakeProcessStarter();
+            var starter = FakeProcessStarter.AllExesExist(); // 3.1: a missing path with a directory is not started
             var launcher = new ProgramLauncher(starter);
             foreach (var program in model.EnabledPrograms())
                 launcher.Launch(program);

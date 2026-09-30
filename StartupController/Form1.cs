@@ -6,7 +6,7 @@ using Microsoft.Win32;
 
 namespace StartupController
 {
-    public partial class Form1 : Form, INotifier
+    public partial class Form1 : Form, INotifier, IMessageDialog
     {
         public bool LaunchFromStartup = false;
         private readonly IUserSettings _settings;
@@ -14,6 +14,14 @@ namespace StartupController
         private readonly IProgramLauncher _launcher;
         private readonly StartupListModel _model = new StartupListModel();
         private readonly OrderSaveCoordinator _saver;
+        private readonly LaunchRunner _runner;
+        private readonly SettingsController _settingsController;
+
+        private bool _suppressSettingEvents; // set while a failed setting change reverts its checkbox
+        private bool _firstShowHandled;       // SetVisibleCore has seen the first show request
+        private bool _startupWorkStarted;     // RunStartupAsync runs once, whether the window is shown or not
+        private bool _manualLaunchInFlight;   // the Launch button ignores clicks until the current launch returns
+        private int _restoreRequested;        // 1 = a second instance asked for the window (set from another thread)
 
         // Used by the WinForms designer; the app goes through Program.cs with the same defaults
         public Form1()
@@ -27,6 +35,8 @@ namespace StartupController
             _registry = registry;
             _launcher = launcher;
             _saver = new OrderSaveCoordinator(_model, _registry, this);
+            _runner = new LaunchRunner(_launcher, this, this);
+            _settingsController = new SettingsController(_settings, _registry, this, Application.ExecutablePath);
 
             InitializeComponent();
             btnEnable.Click += (s, e) => EnableSelectedProgram();
@@ -40,12 +50,7 @@ namespace StartupController
             btnHelp.Click += (s, e) => ShowHelp();
             listViewStartup.DoubleClick += (s, e) => ToggleSelectedProgram();
 
-            notifyIcon.DoubleClick += (s, e) =>
-            {
-                this.Show();
-                this.WindowState = FormWindowState.Normal;
-                this.ShowInTaskbar = true;
-            };
+            notifyIcon.DoubleClick += (s, e) => RestoreFromTray();
             notifyIcon.Icon = this.Icon;
             // Ensure notify icon is visible so the app can be restored from tray
             notifyIcon.Visible = true;
@@ -77,52 +82,24 @@ namespace StartupController
             btnViewLogs.Click += (s, e) => LoggingService.OpenLogFile();
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
             chkLaunchToTray.Checked = _settings.GetStartToTray();
-            chkLaunchToTray.CheckedChanged += (s, e) =>
-            {
-                _settings.SetStartToTray(chkLaunchToTray.Checked);
-            };
+            // Settings checkboxes: a failed write is logged and notified, and the checkbox reverts
+            chkLaunchToTray.CheckedChanged += (s, e) => ApplySetting(chkLaunchToTray, _settingsController.ApplyStartToTray);
             chkSilenceNotifications.Checked = _settings.GetSilenceNotifications();
-            chkSilenceNotifications.CheckedChanged += (s, e) =>
-            {
-                _settings.SetSilenceNotifications(chkSilenceNotifications.Checked);
-            };
+            chkSilenceNotifications.CheckedChanged += (s, e) => ApplySetting(chkSilenceNotifications, _settingsController.ApplySilenceNotifications);
             chkLaunchProgramsOnStartup.Checked = _settings.GetLaunchProgramsOnStartup();
-            chkLaunchProgramsOnStartup.CheckedChanged += (s, e) =>
-            {
-                _settings.SetLaunchProgramsOnStartup(chkLaunchProgramsOnStartup.Checked);
-                if (chkLaunchProgramsOnStartup.Checked)
-                {
-                    string exePath = Application.ExecutablePath; // or your install path
-                    _registry.AddThisApplicationToStartup(exePath);
-                }
-                else
-                {
-                    _registry.RemoveThisApplicationFromStartup();
-                }
-            };
+            chkLaunchProgramsOnStartup.CheckedChanged += (s, e) => ApplySetting(chkLaunchProgramsOnStartup, _settingsController.ApplyLaunchProgramsOnStartup);
 
             // autosave checkbox
             chkAutoSaveOnChange.Checked = _settings.GetAutoSaveOnChange();
             chkAutoSaveOnChange.CheckedChanged += (s, e) =>
             {
-                _settings.SetAutoSaveOnChange(chkAutoSaveOnChange.Checked);
-                LoggingService.LogInfo($"AutoSave {(chkAutoSaveOnChange.Checked ? "on" : "off")}");
                 // Switching AutoSave on saves pending changes right away
-                if (chkAutoSaveOnChange.Checked && _model.IsDirty)
+                if (ApplySetting(chkAutoSaveOnChange, _settingsController.ApplyAutoSaveOnChange) && chkAutoSaveOnChange.Checked && _model.IsDirty)
                     RunSaveAsync(manual: false);
             };
 
-            this.Load += async (s, e) =>
-            {
-                LoggingService.StartSession(string.Join(' ', Environment.GetCommandLineArgs()));
-                LoggingService.LogInfo("Loading startup programs");
-                await LoadStartupPrograms();
-                if (chkLaunchProgramsOnStartup.Checked && this.LaunchFromStartup)
-                {
-                    await LaunchEnabledProgramsAsync();
-                    Application.Exit();
-                }
-            };
+            // Also started from SetVisibleCore when the window starts hidden (Load then waits for the first real show)
+            this.Load += (s, e) => BeginStartupWork();
 
             // Synchronous so e.Cancel is honoured and a save finishes before the process exits
             this.FormClosing += (s, e) => HandleFormClosing(e);
@@ -235,22 +212,146 @@ namespace StartupController
             }
         }
 
-        private async Task LoadStartupPrograms()
+        // Applies a settings checkbox change; on failure reverts the checkbox without re-running the handler.
+        // Returns true when the change was saved.
+        private bool ApplySetting(CheckBox box, Func<bool, bool> apply)
         {
+            if (_suppressSettingEvents) return false;
+
+            bool requested = box.Checked;
+            bool actual = apply(requested);
+            if (actual == requested) return true;
+
+            _suppressSettingEvents = true;
             try
             {
-                // Simulate or perform actual registry access asynchronously
-                var programs = await Task.Run(() => _registry.GetStartupPrograms());
-                _model.Load(programs);
-                //ShowStartupNotification($"Loaded {_model.Count} startup programs.");
-                RefreshListView();
-                LoggingService.LogInfo($"Loaded {_model.Count} startup programs");
+                box.Checked = actual;
+            }
+            finally
+            {
+                _suppressSettingEvents = false;
+            }
+            return false;
+        }
+
+        // Read once, at the first show or the start of the startup work (whichever comes first), so visibility and
+        // launch-and-exit are decided from the same settings even if a checkbox changes later.
+        // LaunchMode: --launch with "Launch programs on startup" on (launch the list, then exit).
+        // StartHidden: Start to tray, or launch mode: the window is not shown at startup.
+        private (bool LaunchMode, bool StartHidden)? _startupMode;
+
+        private (bool LaunchMode, bool StartHidden) StartupMode
+        {
+            get
+            {
+                if (_startupMode == null)
+                {
+                    bool launchMode = LaunchFromStartup && _settings.GetLaunchProgramsOnStartup();
+                    _startupMode = (launchMode, launchMode || _settings.GetStartToTray());
+                }
+                return _startupMode.Value;
+            }
+        }
+
+        private bool IsLaunchMode => StartupMode.LaunchMode;
+
+        private bool StartHidden => StartupMode.StartHidden;
+
+        // A second instance asked for the window (called on the activation thread). Before the handle exists the
+        // request is remembered and honoured in OnHandleCreated instead of being dropped.
+        internal void RequestRestore()
+        {
+            Interlocked.Exchange(ref _restoreRequested, 1);
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(ConsumeRestoreRequest));
+            }
+            catch (InvalidOperationException)
+            {
+                // Handle destroyed meanwhile (closing); nothing to show
+            }
+        }
+
+        private void ConsumeRestoreRequest()
+        {
+            if (Interlocked.Exchange(ref _restoreRequested, 0) == 1)
+                RestoreFromTray();
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            if (Volatile.Read(ref _restoreRequested) == 1)
+                BeginInvoke(new Action(ConsumeRestoreRequest));
+        }
+
+        // The only place that decides startup visibility. Suppressing the first show (instead of hiding the
+        // window after it appeared) avoids a flash. Load is raised only by a real show, so for a hidden start the
+        // startup work is posted from here; Load runs later, when the user restores the window.
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value && !_firstShowHandled)
+            {
+                _firstShowHandled = true;
+                if (StartHidden)
+                {
+                    if (!IsHandleCreated) CreateHandle();
+                    base.SetVisibleCore(false);
+                    BeginInvoke(new Action(BeginStartupWork));
+                    return;
+                }
+            }
+            base.SetVisibleCore(value);
+        }
+
+        // Shows the window from the tray (tray double-click, or a second instance being started)
+        internal void RestoreFromTray()
+        {
+            if (IsDisposed || Disposing) return;
+            this.Show();
+            this.WindowState = FormWindowState.Normal;
+            this.ShowInTaskbar = true;
+            this.Activate();
+            LoggingService.LogInfo("Window restored");
+        }
+
+        private async void BeginStartupWork()
+        {
+            if (_startupWorkStarted) return;
+            _startupWorkStarted = true;
+            try
+            {
+                await RunStartupAsync();
             }
             catch (Exception ex)
             {
-                LoggingService.LogError("Failed to load startup programs", ex);
-                ShowNotification($"Failed to load startup programs: {ex.Message}");
+                LoggingService.LogError("Startup failed", ex);
+                if (IsLaunchMode) Application.Exit();
             }
+        }
+
+        private async Task RunStartupAsync()
+        {
+            LoggingService.StartSession(string.Join(' ', Environment.GetCommandLineArgs()));
+            LoggingService.LogInfo("Loading startup programs");
+            bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this);
+            if (loaded)
+                RefreshListView();
+
+            if (!IsLaunchMode) return;
+
+            if (loaded)
+                await _runner.LaunchSequenceAsync(_model.EnabledPrograms());
+            else
+                LoggingService.LogError("--launch: nothing launched because the startup list could not be loaded");
+
+            // Give the last balloon time to show: Application.Exit disposes the tray icon
+            var delay = StartupSession.ExitDelay(_settings.GetSilenceNotifications(), loadFailed: !loaded);
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay);
+            LoggingService.LogInfo("--launch finished, exiting");
+            Application.Exit();
         }
 
         private void RefreshListView()
@@ -413,68 +514,26 @@ namespace StartupController
             }
         }
 
+        // Logging, notifications and the blocked-entry dialog are handled by LaunchRunner
+        // Clicks while a launch is running are ignored (the button is disabled meanwhile)
         private async void LaunchSelectedProgram()
         {
+            if (_manualLaunchInFlight) return;
             if (SelectedProgram() is not StartupProgram prog) return;
+            _manualLaunchInFlight = true;
+            btnLaunch.Enabled = false;
             try
             {
-                var result = await Task.Run(() => _launcher.Launch(prog));
-                if (result.Success)
-                {
-                    ShowNotification("Launched: " + prog.Name);
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
-                }
-                else if (result.NotFound)
-                {
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
-                    ShowNotification($"Executable not found: {result.Error}");
-                }
-                else
-                {
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
-                    ShowNotification($"Failed to launch: {result.Error}");
-                }
+                await _runner.LaunchManualAsync(prog);
             }
             catch (Exception ex)
             {
-                LoggingService.LogLaunchResult(prog.Name, prog.Path, false, ex.Message);
-                ShowNotification($"Failed to launch: {ex.Message}");
+                LoggingService.LogError($"Failed to launch {prog.Name}", ex);
             }
-        }
-
-        public async Task LaunchEnabledProgramsAsync()
-        {
-            if (!this.LaunchFromStartup) return;
-            var enabledPrograms = _model.EnabledPrograms();
-            int total = enabledPrograms.Count;
-            int current = 1;
-
-            foreach (var prog in enabledPrograms)
+            finally
             {
-                try
-                {
-                    var result = await Task.Run(() => _launcher.Launch(prog));
-                    if (result.Success)
-                    {
-                        ShowStartupNotification(prog.Name, current, total);
-                        //LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
-                    }
-                    else if (result.NotFound)
-                    {
-                        LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
-                    }
-                    else
-                    {
-                        LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
-                        ShowNotification($"Failed to launch {prog.Name}: {result.Error}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, ex.Message);
-                    ShowNotification($"Failed to launch {prog.Name}: {ex.Message}");
-                }
-                current++;
+                _manualLaunchInFlight = false;
+                if (!IsDisposed) btnLaunch.Enabled = true;
             }
         }
         private void MoveSelectedProgram(int direction)
@@ -532,12 +591,13 @@ namespace StartupController
         {
             MessageBox.Show("This application allows you to manage disabled startup programs. Select a program to enable, disable, launch, or reorder it. Use Save Order to persist your preferred startup sequence.");
         }
-        public void ShowStartupNotification(string programName, int current, int total)
-        {
-            ShowNotification($"Starting {programName} ({current} of {total})");
-        }
-
         void INotifier.Notify(string message) => ShowNotification(message);
+
+        void IMessageDialog.ShowWarning(string text, string caption)
+        {
+            if (IsDisposed || Disposing) return;
+            MessageBox.Show(this, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
 
         private void ShowNotification(string text)
         {
@@ -546,16 +606,6 @@ namespace StartupController
             notifyIcon.BalloonTipTitle = "Startup Controller";
             notifyIcon.BalloonTipText = text;
             notifyIcon.ShowBalloonTip(3000); // Show for 3 seconds
-        }
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            if (_settings.GetStartToTray()) // Your setting
-            {
-                this.Hide();
-                this.ShowInTaskbar = false;
-            }
         }
     }
 }

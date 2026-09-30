@@ -9,10 +9,10 @@ namespace StartupController
     public class StartupRegistryService : IStartupRegistry
     {
         // Registry paths
-        private const string RUN_KEY = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string RUN_KEY = AppRegistryPaths.RunKey;
         private const string STARTUP_APPROVED_KEY = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-        private const string APP_ORDER_KEY = @"Software\StartupController";
-        private const string STARTUP_CONTROLLER_NAME = "StartupController";
+        private const string APP_ORDER_KEY = AppRegistryPaths.AppKey;
+        private const string STARTUP_CONTROLLER_NAME = AppRegistryPaths.AppRunValueName;
 
         // Order storage (REG_MULTI_SZ). EnabledPrograms and EnabledFingerprints are written first and
         // ProgramOrder last: migration counts as done only once ProgramOrder exists.
@@ -95,7 +95,8 @@ namespace StartupController
                         Path = path,
                         Enabled = false,
                         Description = "", // Optionally fetch description from file or elsewhere
-                        Fingerprint = fingerprint
+                        Fingerprint = fingerprint,
+                        PathExpanded = kind == RegistryValueKind.ExpandString
                     });
                 }
             }
@@ -274,14 +275,11 @@ namespace StartupController
 
         public void AddThisApplicationToStartup(string exePath)
         {
-            // Registry key for current user startup
-            using (var key = _root.OpenSubKey(RUN_KEY, true))
+            // Registry key for current user startup; created if missing (it can be absent on a fresh profile)
+            using (var key = _root.CreateSubKey(RUN_KEY, writable: true))
             {
-                if (key != null)
-                {
-                    // Always quote the path in case it contains spaces
-                    key.SetValue(STARTUP_CONTROLLER_NAME, $"\"{exePath}\" --launch", RegistryValueKind.String);
-                }
+                // Always quote the path in case it contains spaces
+                key.SetValue(STARTUP_CONTROLLER_NAME, $"\"{exePath}\" --launch", RegistryValueKind.String);
             }
         }
 

@@ -168,9 +168,18 @@ namespace StartupController.Tests
         }
 
         [Fact]
-        public void AddThisApplication_MissingRunKey_DoesNothing_Current() // pinned (#16), 3.3 creates the key
+        public void AddThisApplication_MissingRunKey_CreatesIt() // was AddThisApplication_MissingRunKey_DoesNothing_Current (#16)
         {
             _service.AddThisApplicationToStartup(@"C:\x\app.exe");
+
+            Assert.True(_sandbox.KeyExists(RegistrySandbox.RunPath));
+            Assert.Equal("\"C:\\x\\app.exe\" --launch", _sandbox.ReadValue(RegistrySandbox.RunPath, "StartupController"));
+        }
+
+        [Fact]
+        public void RemoveThisApplication_MissingRunKey_DoesNotThrow_OrCreateIt()
+        {
+            _service.RemoveThisApplicationFromStartup();
 
             Assert.False(_sandbox.KeyExists(RegistrySandbox.RunPath));
         }
