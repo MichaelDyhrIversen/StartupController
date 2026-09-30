@@ -71,6 +71,12 @@ StartupController is a Windows application that allows users to view, manage, an
 - The application must use the Windows Registry under the current user (HKCU) to store and retrieve information.
 - The order of the startup programs and the names of the programs must be persisted in the registry.
 - The application must fetch all relevant startup program information from the registry, including their enabled/disabled status and configuration.
+- Order and enabled state are stored under `HKCU\Software\StartupController` as REG_MULTI_SZ values (new, reflects the implemented design):
+  - `ProgramOrder`: the program names in the chosen order, including saved names whose Run entry is currently missing (kept hidden).
+  - `EnabledPrograms`: the names StartupController launches.
+  - `EnabledFingerprints`: `name|sha256hex` for each enabled name. Only a hash of the Run value (data and value type) is stored, never the command.
+  - Legacy `StartupOrder` (REG_SZ, `;`-joined): read once to migrate when `ProgramOrder` is absent. It is never written or deleted afterwards.
+- Reads: HKCU `Software\Microsoft\Windows\CurrentVersion\Run` and `...\Explorer\StartupApproved\Run`. The app never writes `StartupApproved`. No admin rights are needed.
 
 ## Singleton Application Instance
 

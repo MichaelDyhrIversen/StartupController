@@ -139,3 +139,23 @@ Do not disclose security vulnerabilities in public issues. Instead:
 Check for a SECURITY.md file with disclosure instructions.
 
 ## Thank you for helping improve the project!
+
+## Running the tests and the sandbox rule
+
+Run all tests from the repo root:
+
+```bash
+dotnet test StartupController.sln
+```
+
+Check formatting before opening a PR. CI-style check, it changes nothing and fails if formatting differs:
+
+```bash
+dotnet format --verify-no-changes
+```
+
+Tests must never change this machine's real startup configuration or launch real programs. Never touch `HKCU\...\Run`, `StartupApproved` or `HKCU\Software\StartupController`.
+
+- **RegistrySandbox:** tests that need the registry use a throwaway key under `HKCU\Software\StartupController.Tests\p{pid}-{guid}`, deleted on dispose. If a crash leaves keys behind, they are harmless and can be deleted.
+- **FakeProcessStarter:** tests that launch programs use this fake, which records the request instead of starting anything.
+- **Guard tests:** tests scan the test and production source and fail if test code uses the real registry or process entry points, if production code uses real HKCU outside the composition roots, starts processes other than through the launcher seam, or uses HKLM. Keep new code and tests inside the sandbox and fake so they pass.

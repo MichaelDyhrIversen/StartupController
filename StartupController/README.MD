@@ -21,6 +21,9 @@
 ## Usage
 
 - **Enable/Disable:** Select a program and click "Enable" or "Disable".
+- **What "Enabled" means:** Enabled means StartupController launches the program, in your chosen order, when it runs at login. Disabled means the program is not launched by StartupController. The app changes only its own launch list, never Windows' startup settings.
+- **Entries not listed:** programs that Windows already starts (for example enabled in Task Manager's Startup tab) are not listed, so they are never started twice. To manage one here, disable it in Task Manager first. The app's own entry is never listed.
+- **"Changed – re-enable to launch":** shown when the command of an enabled program changed (for example after an update or reinstall with different data). It is not launched until you enable it again and save. After the next save it shows as Disabled.
 - **Launch:** Select a program and click "Launch" to run it immediately.
 - **Reorder:** Use "Move Up" and "Move Down" to change the order, then "Save Order".
 - **Settings:** Use the checkboxes at the bottom to control notifications, startup behavior, and tray launch.
