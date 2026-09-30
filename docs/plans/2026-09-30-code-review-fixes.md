@@ -32,6 +32,40 @@ The user answered the open questions from the first version of this plan.
     - Stored lists are capped at about 1024 names, each at most 260 characters, on read and on write. Over-long names are dropped, entries past the cap are ignored, and a Warning is logged once per load.
   - The developer is implementing D7 now. Plan text in 2.2 below is updated to match. Where the plan fills in detail beyond the user's decision, it is marked "(plan interpretation)" for the developer to confirm.
 
+## Decisions (2026-10-01)
+
+The user answered the four open questions after Phase 3 was committed.
+
+- **D8: Allow at most one `--launch` sequence per Windows logon session.** This comes from the Phase 3 security review (L2, option 5). It breaks relaunch loops from entries the self-launch guard can't detect: `cmd /c` wrappers, `.lnk` files and renamed copies. A second `--launch` in the same session logs and exits without launching. Suggested design, to be finalised by the planner: store the session id plus the logon or boot time under `HKCU\Software\StartupController`. Accepted downside: a second manual `--launch` in the same session does nothing. **Not implemented yet.**
+- **D9: Don't verify whether Windows expands `%VAR%` in REG_SZ Run values.** Keep the current Phase 3 behaviour: REG_SZ values are expanded at launch, and REG_EXPAND_SZ values are expanded once at read. The accepted risk (security I1) is that a change to `HKCU\Environment` can redirect a launch without changing the D7 fingerprint. That needs same-user write access, which is the same trust level as `Run`. Document this in SECURITY.md.
+- **D10: Move to .NET 10 (LTS) as Phase 5.** .NET 8 support ends on 2026-11-10. Retarget both projects and check the installer (`SetupStartupController.vdproj`), the NuGet packages and CA1416. **Not started.**
+- **D11: The SECURITY.md supported-versions table stays at 1.0.2.** No change is needed.
+
+## Status and handoff (2026-10-01, end of session)
+
+Branch `code-review-fixes` (not pushed, not merged to `master`):
+
+| Commit | Content |
+|---|---|
+| 80aeccb | Phase 1: testability seams and the xUnit project |
+| 3b5a0d8 | Phase 2: StartupApproved semantics, order storage v2 with D7 fingerprints, AutoSave and closing |
+| 75890bf | Docs for Phases 1 and 2 (CHANGELOG, PRD, SECURITY, CONTRIBUTING, READMEs) |
+| 2cd1ef0 | Phase 3 plus two security review rounds (parser M1, direct start, self guard, IPC, CWD pinning) |
+
+418 tests pass, the build has 0 warnings, and `dotnet format` is clean. The security-analyser verdict is that Phase 3 is OK for release as far as M1 is concerned.
+
+Next steps, in order:
+1. **Planner:** add D8 as a Phase 3 or Phase 4 item with a design and test cases, and add Phase 5 (D10).
+2. **Phase 4 (developer):** cleanup items 8, 15, 17, 18 and 20. Item 18 now also covers security L2 and I3: stop logging command-line arguments (names or the exe path only), escape `\r`, `\n` and `\t` in logged values, and add log rotation. Also: wrap `new Mutex` (done in Phase 3), dead code in Form1 (the commented `AdjustListViewColumns` block, the `#pragma CS8602`), `Program.Form_Load`, `async Task Main`, unused usings, making `LaunchFromStartup` a property, moving `NormalizePath` and its P/Invoke into a path helper, and the optional linear parser scan (I-3).
+3. **D8 implementation (developer)**, then the tester, code-inspector and security-analyser review it.
+4. **Documenter:**
+   - CHANGELOG and SECURITY.md for Phase 3: the parsing rules (unquoted commands end at the first .exe/.com/.bat/.cmd/.lnk token, quote folders with such extensions, extensionless unquoted commands with arguments give NotFound).
+   - SECURITY.md: direct start without the MOTW/zone prompt (I-1); the self-guard residuals (wrappers and renamed copies *anywhere*; the mutex and D8 stop loops); the 30 s `--launch` timeout; D9.
+   - The in-app help text in `Form1.cs` (the meaning of Enabled, the Changed status, the salmon Save button, the close prompt).
+   - Check the README button names.
+5. **Phase 5 (D10):** .NET 10.
+6. **Manual UI checks by the user**, still outstanding: start to tray with no flash, tray restore, second start restoring the window, the Launch button disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt Yes/No/Cancel, AutoSave, first-start migration, the Task Manager enable/disable round trip, and `--launch` on a throwaway profile only.
+
 ---
 
 ## Goal
