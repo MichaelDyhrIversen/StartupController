@@ -20,9 +20,14 @@ namespace StartupController
 
         public void MarkClean() => IsDirty = false;
 
+        // Bumped by Load and by every mutator that reports a change. A save marks the list clean only if the
+        // revision it snapshotted is still current, so a change made while a save is running stays dirty.
+        public long Revision { get; private set; }
+
         public void Load(IEnumerable<StartupProgram> programs)
         {
             _programs = programs.ToList();
+            Revision++;
         }
 
         // Position of the program instance in display order, or -1
@@ -46,7 +51,7 @@ namespace StartupController
             if (index <= 0) return false; // missing or already at top
             _programs.RemoveAt(index);
             _programs.Insert(0, program);
-            return true;
+            return Revised();
         }
 
         public bool MoveBottom(StartupProgram program)
@@ -55,29 +60,33 @@ namespace StartupController
             if (index < 0 || index >= _programs.Count - 1) return false; // missing or already at bottom
             _programs.RemoveAt(index);
             _programs.Add(program);
-            return true;
+            return Revised();
         }
 
-        // Enable/Disable report a change even when the flag already had that value (matches the old handlers)
+        // Enable/Disable report a change even when the flag already had that value (matches the old handlers).
+        // All three clear the D7 Changed status: enabling approves the current Run data, disabling drops it.
         public bool Toggle(StartupProgram program)
         {
             if (IndexOf(program) < 0) return false;
             program.Enabled = !program.Enabled;
-            return true;
+            program.Changed = false;
+            return Revised();
         }
 
         public bool Enable(StartupProgram program)
         {
             if (IndexOf(program) < 0) return false;
             program.Enabled = true;
-            return true;
+            program.Changed = false;
+            return Revised();
         }
 
         public bool Disable(StartupProgram program)
         {
             if (IndexOf(program) < 0) return false;
             program.Enabled = false;
-            return true;
+            program.Changed = false;
+            return Revised();
         }
 
         public List<StartupProgram> EnabledPrograms()
@@ -85,12 +94,18 @@ namespace StartupController
             return _programs.Where(p => p.Enabled).ToList();
         }
 
-        // Take on the UI thread; the result is safe to hand to a background save
+        // Take on the UI thread; the result is safe to hand to a background save.
+        // Enabled programs carry the fingerprint of the Run data shown when the list was loaded, so saving
+        // records exactly what the user approved. Changed entries are saved as disabled, without a fingerprint.
         public StoredOrder Snapshot()
         {
+            var enabled = _programs.Where(p => p.Enabled).ToList();
             return StoredOrder.Create(
                 _programs.Select(p => p.Name),
-                _programs.Where(p => p.Enabled).Select(p => p.Name));
+                enabled.Select(p => p.Name),
+                enabled.Where(p => RunFingerprint.IsWellFormed(p.Fingerprint))
+                    .Select(p => new KeyValuePair<string, string>(p.Name, p.Fingerprint)),
+                fingerprintsKnown: true);
         }
 
         private bool Move(StartupProgram program, int direction)
@@ -101,6 +116,12 @@ namespace StartupController
             if (newIndex < 0 || newIndex >= _programs.Count) return false;
             _programs.RemoveAt(index);
             _programs.Insert(newIndex, program);
+            return Revised();
+        }
+
+        private bool Revised()
+        {
+            Revision++;
             return true;
         }
     }

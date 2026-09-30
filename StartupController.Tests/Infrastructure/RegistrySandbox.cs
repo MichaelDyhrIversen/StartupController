@@ -20,7 +20,10 @@ namespace StartupController.Tests.Infrastructure
         public const string RunPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
         public const string ApprovedPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
         public const string AppPath = @"Software\StartupController";
-        public const string OrderValue = "StartupOrder";
+        public const string OrderValue = "StartupOrder"; // legacy REG_SZ
+        public const string ProgramOrderValue = "ProgramOrder";
+        public const string EnabledProgramsValue = "EnabledPrograms";
+        public const string EnabledFingerprintsValue = "EnabledFingerprints";
 
         // Test classes run in parallel: creating a sandbox while another one deletes the shared parent
         // key fails with "marked for deletion", so both go through this lock.
@@ -137,6 +140,13 @@ namespace StartupController.Tests.Infrastructure
             key.SetValue(name, command, RegistryValueKind.String);
         }
 
+        /// <summary>Run value of any kind (e.g. REG_EXPAND_SZ or a non-string value).</summary>
+        public void SeedRunValue(string name, object value, RegistryValueKind kind)
+        {
+            using var key = CreateChild(RunPath);
+            key.SetValue(name, value, kind);
+        }
+
         public void SeedApproved(string name, byte[] value)
         {
             using var key = CreateChild(ApprovedPath);
@@ -153,6 +163,33 @@ namespace StartupController.Tests.Infrastructure
         {
             using var key = CreateChild(AppPath);
             key.SetValue(OrderValue, string.Join(";", names), RegistryValueKind.String);
+        }
+
+        /// <summary>Writes the v2 order format: ProgramOrder and EnabledPrograms as REG_MULTI_SZ.</summary>
+        public void SeedStoredOrder(string[] order, string[] enabled)
+        {
+            using var key = CreateChild(AppPath);
+            key.SetValue(EnabledProgramsValue, enabled, RegistryValueKind.MultiString);
+            key.SetValue(ProgramOrderValue, order, RegistryValueKind.MultiString);
+        }
+
+        public void DeleteRunValue(string name)
+        {
+            using var key = CreateChild(RunPath);
+            key.DeleteValue(name, throwOnMissingValue: false);
+        }
+
+        /// <summary>Every value under the sub key (name, kind, data), for byte-identical comparisons. Empty if the key is missing.</summary>
+        public List<(string Name, RegistryValueKind Kind, object? Data)> ReadAllValues(string subPath)
+        {
+            ThrowIfDisposed();
+            Guard(Root);
+            using var key = Root.OpenSubKey(subPath, writable: false);
+            if (key == null) return new List<(string, RegistryValueKind, object?)>();
+            return key.GetValueNames()
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Select(n => (n, key.GetValueKind(n), key.GetValue(n, null, RegistryValueOptions.DoNotExpandEnvironmentNames)))
+                .ToList();
         }
 
         public void SeedAppValue(string name, object value, RegistryValueKind kind)

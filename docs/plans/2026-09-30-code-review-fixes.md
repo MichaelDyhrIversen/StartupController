@@ -19,6 +19,18 @@ The user answered the open questions from the first version of this plan.
 - **D4 (was Q4): Keep saved names whose Run entry is currently missing** (or currently Windows-enabled), with their position and enabled flag. They are hidden from the list and launched only when they are listed again, meaning present in Run and disabled in Windows. So there is no double launch.
 - **D5 (was Q5): Skip the unsaved-changes prompt during Windows shutdown or logoff** (`CloseReason.WindowsShutDown`). Changes stay unsaved and nothing is written. That is the conservative choice, because the user never confirmed the save.
 - **D6 (was Q6): HKLM, `Run32` and `StartupFolder` stay out of scope.** Only HKCU `Run` and HKCU `StartupApproved\Run` are read. No admin is needed anywhere in this plan.
+- **D7 (2026-09-30): Enabled programs are bound to a fingerprint of their Run command** (the user's choice from the security review). This covers the case where something rewrites a Run value the user enabled.
+  - New REG_MULTI_SZ `EnabledFingerprints` under `HKCU\Software\StartupController`. Each line is `name|sha256`: the lowercase hex SHA-256 of the value kind plus the raw Run data (`kind + "\0" + raw`, UTF-16LE), read once with `RegistryValueOptions.DoNotExpandEnvironmentNames`. Only the hash is stored, never the command.
+  - Mismatch (the Run data changed since the user enabled it): the program is treated as disabled and not launched. The Status column shows "Changed – re-enable to launch", and a Warning is logged with **the name only**.
+  - Re-enabling the program in the app records the new fingerprint.
+  - A reinstall that writes the same Run data keeps the same fingerprint, so it keeps launching.
+  - Migration: a currently listed enabled name that has no fingerprint (legacy `StartupOrder`, or a pre-D7 `EnabledPrograms`) is accepted and launched. Its fingerprint is recorded at the next save. Nothing is written on load. A **hidden** name (D4) that reappears without a fingerprint is **not** launched. It is treated like a mismatch.
+  - Write order: `EnabledPrograms` and `EnabledFingerprints` first, `ProgramOrder` last.
+  - Rejected by the user: fingerprint expiry, re-disabling every name that reappears, and matching on the exe path only.
+  - Phase 2 review changes that come with D7:
+    - The legacy fallback happens **only when `ProgramOrder` is absent**. If `ProgramOrder` exists but is malformed (wrong kind or unreadable), nothing is enabled, a Warning is logged, and the legacy value is **not** used.
+    - Stored lists are capped at about 1024 names, each at most 260 characters, on read and on write. Over-long names are dropped, entries past the cap are ignored, and a Warning is logged once per load.
+  - The developer is implementing D7 now. Plan text in 2.2 below is updated to match. Where the plan fills in detail beyond the user's decision, it is marked "(plan interpretation)" for the developer to confirm.
 
 ---
 
@@ -115,15 +127,22 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 **Risks:** users who "managed" an entry that had no approved value will see it disappear. It was already being run by Windows, so the app was launching it twice. Mention this in the CHANGELOG. We can't check the parity rule against the real Task Manager in tests (hard rule). The developer may check it manually in a throwaway VM.
 **Tests:** null / `[]` → enabled; `02`, `06`, `00×12` → enabled; `03`, `07`, `01` → disabled; a 1-byte `03` → disabled; a sandbox seed with a `StartupController` Run value set to `03` → not listed; an entry with no approved value → not listed.
 
-### 2.2 Order persistence v2: fix the ApplyCustomOrder crash and keep app-disabled order (findings 2, 3, 13)
-**Files:** `StartupRegistryService` (`SaveStartupOrder`, `LoadStartupOrder`, `ApplyCustomOrder`), new `StoredOrder.cs`, `StartupListModel`, `Form1.SaveOrderAsync`.
-- `record StoredOrder(IReadOnlyList<string> Order, IReadOnlySet<string> Enabled)` with case-insensitive comparers.
+### 2.2 Order persistence v2: fix the ApplyCustomOrder crash, keep app-disabled order, add fingerprints (findings 2, 3, 13; D7)
+**Files:** `StartupRegistryService` (`SaveStartupOrder`, `LoadStartupOrder`, `ApplyCustomOrder`), new `StoredOrder.cs`, new `RunFingerprint.cs`, `StartupProgram` (add raw command and a fingerprint status), `StartupListModel`, `Form1.SaveOrderAsync`, `Form1.RefreshListView` (status text).
+- `record StoredOrder(IReadOnlyList<string> Order, IReadOnlySet<string> Enabled, IReadOnlyDictionary<string,string> Fingerprints)`, all with case-insensitive name comparers.
+- `GetStartupPrograms` reads each Run value **once** with `DoNotExpandEnvironmentNames`, plus `GetValueKind`. Both the launch `Path` and the fingerprint come from that single read (security re-review L1): `Path` = `Environment.ExpandEnvironmentVariables(raw)` for REG_EXPAND_SZ, otherwise `raw`. `RunFingerprint.Compute(kind, raw)` = lowercase hex SHA-256 of the UTF-16LE bytes of `kind + "\0" + raw`, where `kind` is the `RegistryValueKind` name (`String` or `ExpandString`). A REG_SZ ↔ REG_EXPAND_SZ switch with the same text therefore counts as Changed. The format hasn't shipped, so there's no version prefix. A non-string Run value can't be fingerprinted, so it is never launched and a Warning is logged with the name only (plan interpretation).
+- Parse `EnabledFingerprints` lines by splitting on the **last** `|`, because names may contain `|` and hashes can't. Ignore malformed lines (not 64 hex characters, empty name) with one Warning.
 - New pure `OrderMerger.Merge(IReadOnlyList<StartupProgram> listed, StoredOrder stored) → List<StartupProgram>`:
-  1. Stored names present in `listed` (OrdinalIgnoreCase), in stored order, with `Enabled = stored.Enabled.Contains(name)`.
+  1. Stored names present in `listed` (OrdinalIgnoreCase), in stored order. `Enabled` is true only when the name is in `stored.Enabled` **and** its fingerprint check passes (D7):
+     - a stored fingerprint that matches → enabled;
+     - a stored fingerprint that doesn't match → disabled, status `Changed`;
+     - no stored fingerprint and the name was listed at the last save or comes from migration → enabled (the fingerprint is recorded at the next save);
+     - no stored fingerprint and the name was hidden (D4) → disabled, status `Changed`. Tell "hidden" and "migrating" apart like this: a pre-D7 store has no `EnabledFingerprints` value at all, so every name is migrating. Once `EnabledFingerprints` exists, each enabled name that was listed at save time has a fingerprint, so an enabled name without one must have been hidden (plan interpretation).
   2. Then listed names not in storage, in registry enumeration order, with `Enabled = false`. New entries are not auto-launched, same as today.
   3. Never index by position. Duplicates in storage: the first one wins.
-- Save (`SaveStartupOrder(StoredOrder)`): the order written is the displayed order **plus** stored-but-unlisted names kept in their relative positions (D4): each unlisted name stays right after the name that came before it in storage, or at the front if it was first. Their enabled flags are kept in `EnabledPrograms`. Filter empty and whitespace names.
-- Remove the misleading TODOs and no-op `Task.Run` at `Form1.cs:281-282, 299-300, 318`. Enable/Disable stay in-memory model changes plus `SetDirty(true)`.
+- Save (`SaveStartupOrder(StoredOrder)`): the order written is the displayed order **plus** stored-but-unlisted names kept in their relative positions (D4): each unlisted name stays right after the name that came before it in storage, or at the front if it was first. Their enabled flags are kept in `EnabledPrograms` and their existing fingerprints in `EnabledFingerprints`. Filter empty and whitespace names. Apply the cap (1024 names, 260 chars each).
+- Fingerprints on save: for each listed enabled name, write the fingerprint of its **current** raw data. Enabling (or re-enabling a `Changed` entry) is therefore what records the new fingerprint. Disabling a name drops its fingerprint. `Changed` entries stay disabled with no fingerprint until the user re-enables them.
+- Remove the misleading TODOs and no-op `Task.Run` at `Form1.cs:281-282, 299-300, 318`. Enable/Disable stay in-memory model changes plus `SetDirty(true)`. Enable on a `Changed` entry clears the status.
 
 **Registry impact (all HKCU, no admin):**
 
@@ -131,14 +150,15 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 |---|---|---|
 | `ProgramOrder` (new) | REG_MULTI_SZ | All managed names, display order |
 | `EnabledPrograms` (new) | REG_MULTI_SZ | Names StartupController launches |
+| `EnabledFingerprints` (new, D7) | REG_MULTI_SZ, `name\|sha256hex` | Fingerprint of each enabled name's raw Run data. A hash only, never the command |
 | `StartupOrder` (legacy) | REG_SZ, `;`-joined | Read once for migration only. Never written, never deleted (D3) |
 
 - **Migration on load:** if `ProgramOrder` is absent and `StartupOrder` is present → `Order = Enabled = legacy.Split(';', RemoveEmptyEntries | TrimEntries)`. This matches what 701437a meant: the legacy list holds exactly the enabled names in order. Don't write anything on load. The new values are written on the first save. Log "Migrated legacy StartupOrder (n names)". Migration counts as done once `ProgramOrder` exists. From then on the legacy value is ignored and left untouched (D3).
-- If `ProgramOrder` exists but has the wrong kind (for example REG_SZ written by hand), fall back to legacy, then to empty, and log a warning. Don't throw.
-- No legacy write (D3). `SaveStartupOrder` writes only `EnabledPrograms`, then `ProgramOrder` (last, see Risks), and never calls `DeleteValue("StartupOrder")`.
+- Fall back to legacy **only when `ProgramOrder` is absent** (D7 review change). If `ProgramOrder` exists but is malformed (wrong kind, for example REG_SZ or REG_DWORD written by hand), use an empty stored order: every listed entry shows, none enabled. Log a Warning and don't throw. The legacy value is not consulted. Treat a malformed `EnabledPrograms` or `EnabledFingerprints` the same way: nothing enabled.
+- No legacy write (D3). `SaveStartupOrder` writes `EnabledPrograms` and `EnabledFingerprints` first, then `ProgramOrder` last (D7, see Risks), and never calls `DeleteValue("StartupOrder")`.
 - Never change the kind of the existing `StartupOrder` value. 701437a reads it `as string`, so a MULTI_SZ there would silently wipe the order on downgrade. (Rejected alternative: reuse `StartupOrder` as REG_MULTI_SZ.)
 
-**Risks:** rolling back to 701437a after a v2 save gives the order as it was at migration time, not later edits. Upgrading again ignores edits made on the rolled-back build, because `ProgramOrder` exists. Both are accepted per D3 and noted in the CHANGELOG. Write `ProgramOrder` last: if the `EnabledPrograms` write fails, migration reruns from the legacy value instead of leaving a half-written v2 state.
+**Risks:** rolling back to 701437a after a v2 save gives the order as it was at migration time, not later edits. Upgrading again ignores edits made on the rolled-back build, because `ProgramOrder` exists. Both are accepted per D3 and noted in the CHANGELOG. Write `ProgramOrder` last: if the `EnabledPrograms` or `EnabledFingerprints` write fails on the first save, migration reruns from the legacy value instead of leaving a half-written v2 state. On later saves a partial write can leave a new `EnabledPrograms` next to old fingerprints. The worst case is an entry shown as `Changed` (fail-closed), never an unexpected launch. D7 risk: any legitimate update that rewrites the Run value (a new version path, changed arguments) stops that program launching until it is re-enabled. The Warning log and the status text make that visible. The CHANGELOG and help must explain it.
 **Tests (pure plus sandbox):**
 - Merge: stored `A,B,C` / enabled `A,C`, listed `C,B,A` → `A(on),B(off),C(on)`.
 - Stored longer than listed (`A,B,C`, listed `A,B`) → no throw, `A,B`.
@@ -150,11 +170,25 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 - Migration: only legacy `A;B` → Order `A,B`, Enabled `A,B`; `ProgramOrder`/`EnabledPrograms` not created until save; after save both exist **and `StartupOrder` is still present and unchanged** (same kind and string).
 - Post-migration: with `ProgramOrder`=`B,A` and legacy `A;B;C` present → the load uses `B,A` and ignores the legacy value. Saving never writes or deletes `StartupOrder`.
 - Failed migration write: the fake store throws on the `ProgramOrder` write → the next load migrates again from the legacy value, with no data loss.
-- Malformed: `ProgramOrder` as REG_DWORD → falls back, no exception.
+- Malformed: `ProgramOrder` as REG_DWORD, with legacy `A;B` present → everything listed, **nothing enabled**, legacy ignored, one Warning, no exception. The same for `ProgramOrder` as REG_SZ.
+- Malformed `EnabledFingerprints` (REG_SZ) → nothing enabled, Warning.
+- Caps: 1500 names in `ProgramOrder` → the first 1024 are used, one Warning; a 300-char name is dropped on read and never written; a save with more than 1024 names writes 1024.
+- D7 match: enabled `A` with a fingerprint of its current raw data → enabled and launched (fake launcher).
+- D7 mismatch: change `A`'s Run data in the sandbox → `A` disabled, status "Changed – re-enable to launch", not handed to the launcher. The log has a Warning whose text contains `A` and **no** part of either command.
+- D7 re-enable: after a mismatch, enable `A` and save → `EnabledFingerprints` holds the new hash and a reload launches `A`.
+- D7 reinstall: delete `A` from Run and re-add it with byte-identical data → still enabled.
+- D7 raw data: the Run value is REG_EXPAND_SZ `%LOCALAPPDATA%\x.exe`. The fingerprint is computed over the unexpanded string, so changing the `LOCALAPPDATA` environment variable doesn't change it. Compare with a known SHA-256 of the UTF-16LE bytes of `"ExpandString\0" + raw`. Also: Path and fingerprint come from one read; a REG_SZ → REG_EXPAND_SZ switch with the same text → Changed; REG_EXPAND_SZ Path is expanded, REG_SZ Path is literal.
+- D7 storage: `EnabledFingerprints` lines contain only `name|` plus 64 lowercase hex characters. Assert that no stored value contains the command text.
+- D7 name with `|`: `a|b` round-trips (split on the last `|`).
+- D7 migration, listed: only legacy `A;B`, both listed → both enabled and launched. Nothing is written on load (the sandbox values are unchanged). After a save, `EnabledFingerprints` has both hashes.
+- D7 migration, pre-D7 v2 store: `ProgramOrder`/`EnabledPrograms` exist with no `EnabledFingerprints` → listed enabled names are accepted and recorded at the next save.
+- D7 hidden reappearance: `EnabledFingerprints` exists, `X` is in `EnabledPrograms` with no fingerprint (it was hidden at the last save), and `X` reappears in Run disabled in Windows → listed, status `Changed`, not launched.
+- D7 disable drops the fingerprint: disable `A` and save → no `A|` line.
+- D7 write order: a fake store records the call sequence → `EnabledPrograms`, `EnabledFingerprints`, `ProgramOrder`. If the fake throws on `EnabledFingerprints` during the first save → `ProgramOrder` is not written and the next load migrates again.
 - D4 position: stored `A,X,B` (X enabled), listed `A,B`, move B up, save → `ProgramOrder` = `B,A,X` (X stays after A) and `EnabledPrograms` still contains X.
-- D4 relisting: stored `A,X` (X enabled), X absent from Run → X not listed or launched. Seed X in Run with approved `03` → X is listed in position 2 and enabled.
+- D4 relisting: stored `A,X` (X enabled, **with a fingerprint** of its old data), X absent from Run → X not listed or launched. Seed X in Run with the same data and approved `03` → X is listed in position 2 and enabled. Seed it with **different** data → listed in position 2, status `Changed`, not launched (D7).
 - D4 no double launch: X stored and enabled, X present in Run with approved `02` (or no approved value) → X is not listed and not handed to the launcher.
-- Entry removed externally while the app runs: load `A,B`, delete B from the sandbox Run key, save from the model → B kept in storage with its position and flag (D4). Reload → `A` only, no exception.
+- Entry removed externally while the app runs: load `A,B`, delete B from the sandbox Run key, save from the model → B kept in storage with its position, flag and fingerprint (D4, D7). Reload → `A` only, no exception.
 
 ### 2.3 `SetProgramEnabled` (finding 10)
 - Delete `StartupRegistryService.SetProgramEnabled` (D2: the app never changes Windows' startup configuration). Nothing in the app opens `StartupApproved` for writing any more; the read in `GetStartupPrograms` stays.
@@ -170,7 +204,7 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 - Turning AutoSave on while `IsDirty` → save immediately.
 - Fix `SetDirty`'s dead branch and empty catch as part of this rewrite.
 
-**Registry impact:** same values as 2.2. There is no new key.
+**Registry impact:** same values as 2.2 (`ProgramOrder`, `EnabledPrograms`, `EnabledFingerprints`), in the same write order. There is no new key.
 **Risks:** a UI-thread deadlock if the UI thread waits on `_saveLock` while a background save needs the UI thread. Mitigation: the code under the lock is registry-only, with no UI marshalling.
 **Tests (with a fake `IOrderStore` or the sandbox, and a fake that can delay or throw):**
 - Two saves, where the first is slowed by the fake so the second finishes first → the stored value equals the second snapshot.
@@ -200,7 +234,35 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 
 **Registry impact:** none (reads the Run command already loaded).
 **Risks:** prefix resolution can resolve to an unexpected file (`C:\Program.exe` hijack, the classic unquoted-path issue). Send this to `security-analyser`. Consider preferring the longest existing prefix, or warning in the log when the path is unquoted and has spaces.
-**Tests (fake `fileExists` / `IProcessStarter`):** `"C:\a b\x.exe" -y`; unquoted `C:\Program Files\x.exe -y` with only the full path existing → exe `C:\Program Files\x.exe`, args `-y`; `C:\x.exe.d\app.exe` with only the full path existing → full path; unmatched quote `"C:\a b.exe` → exe `C:\a b.exe`; `%LOCALAPPDATA%\x.exe` → expanded; `rundll32.exe shell32.dll,Foo` with no file → exe `rundll32.exe`, args `shell32.dll,Foo`; empty → error result with no Start call; the starter throws → failure result, logged once as a failure; the notifier throws → the launch is still logged as a success; FileNotFound → the notification is raised; the returned handle is disposed (a fake that tracks Dispose).
+**Tests (fake `fileExists` / `IProcessStarter`):** `"C:\a b\x.exe" -y`; unquoted `C:\Program Files\x.exe -y` with only the full path existing → exe `C:\Program Files\x.exe`, args `-y`; `C:\x.exe.d\app.exe` with only the full path existing → full path; unmatched quote `"C:\a b.exe` → exe `C:\a b.exe`; `%LOCALAPPDATA%x.exe` → expanded; `rundll32.exe shell32.dll,Foo` with no file → exe `rundll32.exe`, args `shell32.dll,Foo`; empty → error result with no Start call; the starter throws → failure result, logged once as a failure; the notifier throws → the launch is still logged as a success; FileNotFound → the notification is raised; the returned handle is disposed (a fake that tracks Dispose).
+
+### 3.1a Never launch StartupController itself (security-analyser, Low)
+**Why:** 2.1 hides only the canonical `StartupController` Run value. A Run entry under **any other name** (stale from an old install, copied, or planted) that points at `StartupController.exe --launch` could be enabled and launched. The child starts after the parent exits (the parent exits after launching; see 3.2), takes the mutex, and relaunches every enabled entry, including itself, in a loop.
+**Files:** `ProgramLauncher.cs` (it already owns parse and resolve after 3.1), `CommandLineParser.cs`, `Form1.LaunchSelectedProgram`, `Form1.LaunchEnabledProgramsAsync`.
+- `ProgramLauncher` takes a `selfExePath` (default `Application.ExecutablePath`) and an injectable `Func<string,string> normalizePath` (default: `Path.GetFullPath` plus `GetLongPathNameW` when the file exists, so 8.3 short names like `STARTU~1.EXE` resolve).
+- After parsing, env expansion and prefix resolution, **before** any `Start` (including the shell fallback), block when the resolved exe:
+  - normalizes to the same path as `selfExePath` (OrdinalIgnoreCase), **or**
+  - has the file name `StartupController.exe` (OrdinalIgnoreCase) in any directory, **or**
+  - has no extension and resolves via the `.exe` probe to such a file.
+- The check is on the **parsed executable only**, whatever the Run value name. Arguments are not scanned.
+- A blocked launch returns `LaunchResult.Blocked` and logs a Warning with the entry name only. In `--launch` it counts as skipped in the "Launched n of m" summary, with no per-entry balloon. A manual Launch shows a MessageBox: "This entry starts StartupController itself and can't be launched from here."
+- Optional: in `RefreshListView`, show such entries with status "Blocked (StartupController)" so the user understands why they never start.
+
+**Registry impact:** none. It reads the Run data already loaded.
+**Risks:** wrappers such as `cmd /c StartupController.exe --launch` or a renamed copy of the exe are not caught, because the rule matches the parsed exe only. The singleton mutex blocks the loop only while the parent is still running. The 3.2 exit delay narrows but doesn't close that window. Recorded as a residual risk for `security-analyser`. Comparing file hashes of the target and self would catch renamed copies; that is out of scope unless requested.
+**Tests (fake `IProcessStarter`, fake `fileExists`/`normalizePath`, `selfExePath` = `C:\Program Files\StartupController\StartupController.exe`):**
+- `"C:\Program Files\StartupController\StartupController.exe" --launch` under Run name `Foo` → Blocked, starter never called, Warning logged containing `Foo` and not the command.
+- The same path in different case (`c:\program files\startupcontroller\STARTUPCONTROLLER.EXE`) → Blocked.
+- Another directory: `"D:\Old\StartupController.exe" --launch` → Blocked (file-name rule).
+- Unquoted with spaces: `C:\Program Files\StartupController\StartupController.exe --launch`, resolved by prefix → Blocked.
+- No extension: `"C:\Program Files\StartupController\StartupController" --launch` with the `.exe` probe succeeding → Blocked.
+- Env var: `%ProgramFiles%\StartupController\StartupController.exe` → Blocked after expansion.
+- Relative segments: `C:\Program Files\x\..\StartupController\StartupController.exe` → Blocked after normalization.
+- 8.3 short name: the fake `normalizePath` maps `C:\PROGRA~1\STARTU~1\STARTU~1.EXE` to the self path → Blocked.
+- Shell fallback path: the exe isn't found but its file name is `StartupController.exe` → Blocked, no shell start.
+- Not blocked: `C:\x\StartupControllerHelper.exe`, `C:\x\MyStartupController.exe`, `notepad.exe C:\x\StartupController.exe` (the name appears only in the arguments) → started once each.
+- `--launch` sequence `A`, self-entry `S`, `B` → the starter receives `A` and `B` only, and the summary is "Launched 2 of 3".
+- Manual Launch on `S` → Blocked result, and the MessageBox path is taken (checked through the `INotifier`/dialog seam).
 
 ### 3.2 `--launch` mode, tray, singleton (findings 6, 19)
 **Files:** `Form1.cs` Load handler and `OnShown`, `Program.cs`.
@@ -238,14 +300,16 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 ---
 
 ## Docs to update (documenter)
-- `CHANGELOG`: 2.1 behaviour change (entries with no approved value and the app's own entry no longer listed; the double-launch fix), the 2.2 storage change (`ProgramOrder`/`EnabledPrograms`, legacy `StartupOrder` read once for migration and left in place; a rollback gives the order as of migration), AutoSave no longer shows a balloon on success.
-- `StartupController/PRD.MD`: §3 was already reworded by the planner (D1). Documenter: add `ProgramOrder`/`EnabledPrograms` to Registry Usage.
+- `CHANGELOG`: 2.1 behaviour change (entries with no approved value and the app's own entry no longer listed; the double-launch fix), the 2.2 storage change (`ProgramOrder`/`EnabledPrograms`/`EnabledFingerprints`, legacy `StartupOrder` read once for migration and left in place; a rollback gives the order as of migration), AutoSave no longer shows a balloon on success. D7: an enabled program whose Run command changes stops launching and shows "Changed – re-enable to launch" until it is re-enabled. 3.1a: entries that point at StartupController itself are never launched.
+- `StartupController/PRD.MD`: §3 was already reworded by the planner (D1). Documenter: add `ProgramOrder`, `EnabledPrograms` and `EnabledFingerprints` to Registry Usage. Note that `EnabledFingerprints` stores only a SHA-256 hash of each enabled program's Run data, never the command.
 - `README.md` and `StartupController/README.MD`: explain what "Enabled" means in the app compared with Task Manager. Mention that entries enabled in Task Manager don't appear in the list.
-- In-app help (`Form1.ShowHelp`): the same explanation.
+- In-app help (`Form1.ShowHelp`): the same explanation, plus what "Changed – re-enable to launch" means (D7).
 - `CONTRIBUTING.md`: how to run `dotnet test`, and the registry sandbox rule.
 
 ## Risks (cross-cutting)
 - Phase 1 changes the `Form1` constructor. The designer needs the parameterless constructor, so keep it.
 - 2.1 plus 2.2 change what users see on the first run after upgrading. The CHANGELOG must explain it.
 - 3.1 prefix resolution needs `security-analyser` review (unquoted-path hijack).
-- Run `security-analyser` on Phases 2, 3.1, 3.2 and 3.3 (registry, process launch, IPC).
+- D7 fails closed: legitimate app updates that rewrite their Run value stop launching until re-enabled. The UI status and CHANGELOG must make this obvious.
+- 3.1a doesn't catch wrapper commands or renamed copies (residual risk).
+- Run `security-analyser` on Phases 2, 3.1, 3.1a, 3.2 and 3.3 (registry, process launch, IPC).

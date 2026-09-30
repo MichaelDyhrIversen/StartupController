@@ -15,66 +15,83 @@ namespace StartupController.Tests
         private static string Names(IEnumerable<StartupProgram> p) => string.Join(",", p.Select(x => x.Name));
         private static string EnabledNames(IEnumerable<StartupProgram> p) => string.Join(",", p.Where(x => x.Enabled).Select(x => x.Name));
 
-        // --- ApplyCustomOrder ---
+        // --- OrderMerger (was ApplyCustomOrder) ---
 
         [Fact]
-        public void ApplyCustomOrder_EmptyOrder_ReturnsSameListInstance()
+        public void Merge_ReturnsNewInstances_AndLeavesInputUntouched() // was ApplyCustomOrder_EmptyOrder_ReturnsSameListInstance
         {
             var input = List("B", "A");
 
-            Assert.Same(input, StartupRegistryService.ApplyCustomOrder(input, Array.Empty<string>()));
+            var result = OrderMerger.Merge(input, StoredOrder.Create(new[] { "A" }, new[] { "A" }));
+
+            Assert.NotSame(input, result);
+            Assert.DoesNotContain(result, p => input.Contains(p));
+            Assert.All(input, p => Assert.False(p.Enabled));
+            Assert.Equal("B,A", Names(input));
         }
 
         [Fact]
-        public void ApplyCustomOrder_DuplicateNamesInOrder_EnableByPosition_Current() // pinned (#2): positions, not names
+        public void Merge_DuplicateStoredNames_FirstWins_AndEnablesByName() // was ApplyCustomOrder_DuplicateNamesInOrder_EnableByPosition_Current
         {
-            var result = StartupRegistryService.ApplyCustomOrder(List("A", "B", "C"), new[] { "A", "A" });
+            var result = OrderMerger.Merge(List("A", "B", "C"), StoredOrder.Create(new[] { "A", "A", "B" }, new[] { "A" }));
 
             Assert.Equal("A,B,C", Names(result));
-            Assert.Equal("A,B", EnabledNames(result)); // B is enabled only because the order has 2 entries
+            Assert.Equal("A", EnabledNames(result)); // B is stored but not enabled
         }
 
         [Fact]
-        public void ApplyCustomOrder_EmptySegmentInOrder_EnablesAnExtraProgram_Current() // pinned: legacy "A;;B" counts 3 entries
+        public void LegacyEmptySegments_DoNotEnableExtraPrograms() // was ApplyCustomOrder_EmptySegmentInOrder_EnablesAnExtraProgram_Current
         {
-            var result = StartupRegistryService.ApplyCustomOrder(List("A", "B", "C"), new[] { "A", "", "B" });
+            SeedDisabled("A", "B", "C");
+            _sandbox.SeedAppValue(RegistrySandbox.OrderValue, "A;;B", RegistryValueKind.String);
+
+            var result = new StartupRegistryService(_sandbox.Root).GetStartupPrograms();
 
             Assert.Equal("A,B,C", Names(result));
-            Assert.Equal("A,B,C", EnabledNames(result));
+            Assert.Equal("A,B", EnabledNames(result));
         }
 
         [Fact]
-        public void ApplyCustomOrder_IsStableForUnlistedEntries_AndFlagsInputObjects()
+        public void Merge_IsStableForUnlistedEntries() // was ApplyCustomOrder_IsStableForUnlistedEntries_AndFlagsInputObjects
         {
             var input = List("D", "C", "B", "A");
 
-            var result = StartupRegistryService.ApplyCustomOrder(input, new[] { "B" });
+            var result = OrderMerger.Merge(input, StoredOrder.Create(new[] { "B" }, new[] { "B" }));
 
             Assert.Equal("B,D,C,A", Names(result));
             Assert.Equal("B", EnabledNames(result));
-            Assert.True(input.Single(p => p.Name == "B").Enabled); // same instances are flagged
+            Assert.False(input.Single(p => p.Name == "B").Enabled); // inputs are not flagged any more
         }
 
         // --- Service via sandbox ---
 
         [Fact]
-        public void ApprovedValueOfWrongKind_IsTreatedAsMissing_AndListed_Current() // pinned: 'as byte[]' gives null -> disabled
+        public void ApprovedValueOfWrongKind_IsTreatedAsMissing_AndNotListed() // was ..._AndListed_Current: missing = Windows runs it
         {
             _sandbox.SeedRun("A", @"C:\Apps\A.exe");
             _sandbox.CreateApprovedKey();
             using (var key = _sandbox.Root.CreateSubKey(RegistrySandbox.ApprovedPath, writable: true)!)
                 key.SetValue("A", "03", RegistryValueKind.String);
 
-            Assert.Equal("A", Assert.Single(new StartupRegistryService(_sandbox.Root).GetStartupPrograms()).Name);
+            Assert.Empty(new StartupRegistryService(_sandbox.Root).GetStartupPrograms());
         }
 
         [Fact]
-        public void EmptyApprovedArray_IsListed_Current() // pinned via the registry: empty binary = disabled
+        public void EmptyApprovedArray_IsNotListed() // was EmptyApprovedArray_IsListed_Current: empty binary = enabled
         {
             _sandbox.SeedRun("A", @"C:\Apps\A.exe");
             _sandbox.SeedApproved("A", Array.Empty<byte>());
 
-            Assert.Single(new StartupRegistryService(_sandbox.Root).GetStartupPrograms());
+            Assert.Empty(new StartupRegistryService(_sandbox.Root).GetStartupPrograms());
+        }
+
+        private void SeedDisabled(params string[] names)
+        {
+            foreach (var name in names)
+            {
+                _sandbox.SeedRun(name, $@"C:\Apps\{name}.exe");
+                _sandbox.SeedApproved(name, Approved(0x03));
+            }
         }
 
         [Fact]
@@ -87,7 +104,7 @@ namespace StartupController.Tests
             var service = new StartupRegistryService(_sandbox.Root);
 
             var listed = service.GetStartupPrograms();
-            service.SaveStartupOrder(listed.Select(p => p.Name).ToList());
+            service.SaveStartupOrder(StoredOrder.Create(listed.Select(p => p.Name), listed.Select(p => p.Name)));
             service.GetStartupPrograms();
 
             Assert.Equal(Approved(0x03), (byte[])_sandbox.ReadValue(RegistrySandbox.ApprovedPath, "A")!);
@@ -97,15 +114,28 @@ namespace StartupController.Tests
         }
 
         [Fact]
-        public void SaveStartupOrder_EmptyList_WritesEmptyString_AndLoadsEmpty()
+        public void SaveStartupOrder_Empty_WritesEmptyMultiSz_AndLoadsEmpty() // was SaveStartupOrder_EmptyList_WritesEmptyString_AndLoadsEmpty
         {
             var service = new StartupRegistryService(_sandbox.Root);
-            service.SaveStartupOrder(new List<string> { "A" });
 
-            service.SaveStartupOrder(new List<string>());
+            service.SaveStartupOrder(StoredOrder.Empty);
 
-            Assert.Equal("", _sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.OrderValue));
-            Assert.Empty(service.LoadStartupOrder());
+            Assert.Equal(Array.Empty<string>(), (string[])_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.ProgramOrderValue)!);
+            Assert.Equal(Array.Empty<string>(), (string[])_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.EnabledProgramsValue)!);
+            Assert.Empty(service.LoadStoredOrder().Order);
+        }
+
+        [Fact]
+        public void SaveStartupOrder_EmptyDisplayed_KeepsPreviouslyStoredNames() // D4: nothing displayed is not "forget everything"
+        {
+            var service = new StartupRegistryService(_sandbox.Root);
+            service.SaveStartupOrder(StoredOrder.Create(new[] { "A" }, new[] { "A" }));
+
+            service.SaveStartupOrder(StoredOrder.Empty);
+
+            var loaded = service.LoadStoredOrder();
+            Assert.Equal(new[] { "A" }, loaded.Order);
+            Assert.Equal(new[] { "A" }, loaded.EnabledInOrder());
         }
 
         [Fact]
@@ -114,18 +144,18 @@ namespace StartupController.Tests
             var settings = new UserSettings(_sandbox.Root);
             settings.SetStartToTray(true);
 
-            new StartupRegistryService(_sandbox.Root).SaveStartupOrder(new List<string> { "A" });
+            new StartupRegistryService(_sandbox.Root).SaveStartupOrder(StoredOrder.Create(new[] { "A" }, new[] { "A" }));
 
             Assert.Equal(1, _sandbox.ReadValue(RegistrySandbox.AppPath, "StartToTray"));
-            Assert.Equal("A", _sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.OrderValue));
+            Assert.Equal(new[] { "A" }, (string[])_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.ProgramOrderValue)!);
         }
 
         [Fact]
-        public void LoadStartupOrder_NonStringValue_ReturnsEmpty()
+        public void LoadStoredOrder_LegacyNonStringValue_ReturnsEmpty() // was LoadStartupOrder_NonStringValue_ReturnsEmpty
         {
             _sandbox.SeedAppValue(RegistrySandbox.OrderValue, 5, RegistryValueKind.DWord);
 
-            Assert.Empty(new StartupRegistryService(_sandbox.Root).LoadStartupOrder());
+            Assert.Empty(new StartupRegistryService(_sandbox.Root).LoadStoredOrder().Order);
         }
 
         [Fact]
@@ -144,8 +174,9 @@ namespace StartupController.Tests
             var service = new StartupRegistryService(readOnly);
 
             Assert.Single(service.GetStartupPrograms());
-            Assert.ThrowsAny<Exception>(() => service.SaveStartupOrder(new List<string> { "A" }));
-            Assert.Null(_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.OrderValue));
+            Assert.ThrowsAny<Exception>(() => service.SaveStartupOrder(StoredOrder.Create(new[] { "A" }, new[] { "A" })));
+            Assert.Null(_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.ProgramOrderValue));
+            Assert.Null(_sandbox.ReadValue(RegistrySandbox.AppPath, RegistrySandbox.EnabledProgramsValue));
         }
 
         // --- UserSettings ---

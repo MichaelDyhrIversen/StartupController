@@ -4,4 +4,11 @@ public class StartupProgram
     public required string Path { get; set; }
     public required bool Enabled { get; set; }
     public required string Description { get; set; }
+
+    // RunFingerprint of the raw Run value data when the list was loaded; empty if unknown
+    public string Fingerprint { get; set; } = "";
+
+    // Stored as enabled, but the Run data no longer matches the approved fingerprint (or has none) (D7).
+    // Enabled is false while Changed is true, so it is never launched. Enable/Disable clear it.
+    public bool Changed { get; set; }
 }

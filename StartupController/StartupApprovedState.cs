@@ -1,23 +1,17 @@
-using System.Linq;
-
 namespace StartupController
 {
     // Interprets the binary values under Explorer\StartupApproved\Run.
     internal static class StartupApprovedState
     {
-        // Check if a StartupApproved value means "enabled"
+        // Check if a StartupApproved value means "Windows runs this entry"
         internal static bool IsEnabled(byte[]? value)
         {
-            // If no value or empty array treat as disabled
+            // No value: Windows runs the Run entry (Task Manager shows it as Enabled)
             if (value == null || value.Length == 0)
-                return false;
-
-            // If all bytes are zero, treat as enabled
-            if (value.All(b => b == 0x00))
                 return true;
 
-            // Enabled: 0x02 0x00 0x00 0x00..., Disabled: 0x03 0x00 0x00 0x00...
-            return value[0] == 0x02;
+            // Even first byte = enabled (0x02, 0x06, all-zero), odd = disabled (0x01, 0x03, 0x07)
+            return (value[0] & 0x01) == 0;
         }
     }
 }
