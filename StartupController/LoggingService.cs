@@ -8,24 +8,52 @@ namespace StartupController
     public static class LoggingService
     {
         private static readonly object _lock = new object();
-        private static readonly string _logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "StartupController", "logs");
-        private static readonly string _logFile = Path.Combine(_logDir, "startupcontroller.log");
+        private static string _logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "StartupController", "logs");
+        private static string _logFile = Path.Combine(_logDir, "startupcontroller.log");
+        private static bool _initialized;
 
-        static LoggingService()
+        // Point the logger at another directory (tests use a temp folder). Call before the first log line
+        // so nothing is written to the default location.
+        internal static void Initialize(string logDirectory)
         {
-            try
+            lock (_lock)
             {
-                Directory.CreateDirectory(_logDir);
-                AppendLine("INFO", "Logger", "Logger initialized");
+                _logDir = logDirectory;
+                _logFile = Path.Combine(_logDir, "startupcontroller.log");
+                _initialized = false;
             }
-            catch
+            EnsureInitialized();
+        }
+
+        internal static string LogFilePath
+        {
+            get { lock (_lock) { return _logFile; } }
+        }
+
+        // Create the log directory and write the header once, on first use.
+        private static void EnsureInitialized()
+        {
+            // Monitor is re-entrant, so the AppendLine call below can take the same lock
+            lock (_lock)
             {
-                // ignore logging initialization failures
+                if (_initialized) return;
+                _initialized = true;
+
+                try
+                {
+                    Directory.CreateDirectory(_logDir);
+                    AppendLine("INFO", "Logger", "Logger initialized");
+                }
+                catch
+                {
+                    // ignore logging initialization failures
+                }
             }
         }
 
         private static void AppendLine(string level, string category, string message)
         {
+            EnsureInitialized();
             try
             {
                 var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
@@ -75,6 +103,7 @@ namespace StartupController
 
         public static void OpenLogFile()
         {
+            EnsureInitialized();
             try
             {
                 if (!File.Exists(_logFile))

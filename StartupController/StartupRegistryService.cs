@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace StartupController
 {
-    public class StartupRegistryService
+    public class StartupRegistryService : IStartupRegistry
     {
         // Registry paths
         private const string RUN_KEY = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -14,14 +14,25 @@ namespace StartupController
         private const string ORDER_VALUE = "StartupOrder";
         private const string STARTUP_CONTROLLER_NAME = "StartupController";
 
+        // All key paths are relative to this root (HKCU in the app, a sandbox key in tests)
+        private readonly RegistryKey _root;
+
+        public StartupRegistryService() : this(Registry.CurrentUser)
+        {
+        }
+
+        public StartupRegistryService(RegistryKey root)
+        {
+            _root = root ?? throw new ArgumentNullException(nameof(root));
+        }
 
         // Fetch all startup programs (enabled and disabled)
         public List<StartupProgram> GetStartupPrograms()
         {
             var programs = new List<StartupProgram>();
 
-            using (var runKey = Registry.CurrentUser.OpenSubKey(RUN_KEY, false))
-            using (var approvedKey = Registry.CurrentUser.OpenSubKey(STARTUP_APPROVED_KEY, false))
+            using (var runKey = _root.OpenSubKey(RUN_KEY, false))
+            using (var approvedKey = _root.OpenSubKey(STARTUP_APPROVED_KEY, false))
             {
                 if (runKey == null || approvedKey == null)
                     return programs;
@@ -30,7 +41,7 @@ namespace StartupController
                 {
                     var path = runKey.GetValue(name)?.ToString() ?? "";
                     var enabled = IsProgramEnabled(approvedKey, name);
-                    if(!enabled)
+                    if (!enabled)
                         programs.Add(new StartupProgram
                         {
                             Name = name,
@@ -42,30 +53,20 @@ namespace StartupController
             }
 
             // Apply custom order if available
-            var ordered = ApplyCustomOrder(programs);
+            var ordered = ApplyCustomOrder(programs, LoadStartupOrder());
             return ordered;
         }
 
         // Check if a program is enabled in StartupApproved
-        private bool IsProgramEnabled(RegistryKey approvedKey, string name)
+        private static bool IsProgramEnabled(RegistryKey approvedKey, string name)
         {
-            var value = approvedKey.GetValue(name) as byte[];
-            // If no value or empty array treat as disabled
-            if (value == null || value.Length == 0)
-                return false;
-
-            // If all bytes are zero, treat as enabled
-            if (value.All(b => b == 0x00))
-                return true;
-
-            // Enabled: 0x02 0x00 0x00 0x00..., Disabled: 0x03 0x00 0x00 0x00...
-            return value[0] == 0x02;
+            return StartupApprovedState.IsEnabled(approvedKey.GetValue(name) as byte[]);
         }
 
         // Enable or disable a startup program
         public void SetProgramEnabled(string name, bool enabled)
         {
-            using (var approvedKey = Registry.CurrentUser.OpenSubKey(STARTUP_APPROVED_KEY, true))
+            using (var approvedKey = _root.OpenSubKey(STARTUP_APPROVED_KEY, true))
             {
                 if (approvedKey == null) return;
                 var value = approvedKey.GetValue(name) as byte[];
@@ -78,7 +79,7 @@ namespace StartupController
         // Save the custom order of startup programs
         public void SaveStartupOrder(List<string> orderedNames)
         {
-            using (var appKey = Registry.CurrentUser.CreateSubKey(APP_ORDER_KEY))
+            using (var appKey = _root.CreateSubKey(APP_ORDER_KEY))
             {
                 if (appKey == null) return;
                 var orderString = string.Join(";", orderedNames);
@@ -89,7 +90,7 @@ namespace StartupController
         // Load the custom order of startup programs
         public List<string> LoadStartupOrder()
         {
-            using (var appKey = Registry.CurrentUser.OpenSubKey(APP_ORDER_KEY, false))
+            using (var appKey = _root.OpenSubKey(APP_ORDER_KEY, false))
             {
                 if (appKey == null) return new List<string>();
                 var orderString = appKey.GetValue(ORDER_VALUE) as string;
@@ -100,27 +101,37 @@ namespace StartupController
         }
 
         // Apply custom order to the list of programs
-        private List<StartupProgram> ApplyCustomOrder(List<StartupProgram> programs)
+        internal static List<StartupProgram> ApplyCustomOrder(List<StartupProgram> programs, IReadOnlyList<string> order)
         {
-            var order = LoadStartupOrder();
             if (order.Count == 0) return programs;
 
             var ordered = programs.OrderBy(p =>
             {
-                var idx = order.IndexOf(p.Name);
+                var idx = IndexOf(order, p.Name);
                 return idx >= 0 ? idx : int.MaxValue;
             }).ToList();
-            for(int i = 0; i < order.Count; i++)
+            for (int i = 0; i < order.Count; i++)
             {
                 ordered[i].Enabled = true;
             }
             return ordered;
         }
 
+        // Case-sensitive, like List<string>.IndexOf
+        private static int IndexOf(IReadOnlyList<string> order, string name)
+        {
+            for (int i = 0; i < order.Count; i++)
+            {
+                if (string.Equals(order[i], name, StringComparison.Ordinal))
+                    return i;
+            }
+            return -1;
+        }
+
         public void AddThisApplicationToStartup(string exePath)
         {
             // Registry key for current user startup
-            using (var key = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
+            using (var key = _root.OpenSubKey(RUN_KEY, true))
             {
                 if (key != null)
                 {
@@ -133,7 +144,7 @@ namespace StartupController
         public void RemoveThisApplicationFromStartup()
         {
             // Registry key for current user startup
-            using (var key = Registry.CurrentUser.OpenSubKey(RUN_KEY, true))
+            using (var key = _root.OpenSubKey(RUN_KEY, true))
             {
                 if (key != null)
                 {

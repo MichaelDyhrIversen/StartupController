@@ -1,18 +1,31 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
-using System.Text.RegularExpressions;
 using System.IO;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace StartupController
 {
     public partial class Form1 : Form
     {
         public bool LaunchFromStartup = false;
-        private bool isDirty = false;
+        private readonly IUserSettings _settings;
+        private readonly IStartupRegistry _registry;
+        private readonly IProgramLauncher _launcher;
+        private readonly StartupListModel _model = new StartupListModel();
 
+        // Used by the WinForms designer; the app goes through Program.cs with the same defaults
         public Form1()
+            : this(new UserSettings(Registry.CurrentUser), new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()))
         {
+        }
+
+        public Form1(IUserSettings settings, IStartupRegistry registry, IProgramLauncher launcher)
+        {
+            _settings = settings;
+            _registry = registry;
+            _launcher = launcher;
+
             InitializeComponent();
             btnEnable.Click += (s, e) => EnableSelectedProgram();
             btnDisable.Click += (s, e) => DisableSelectedProgram();
@@ -38,7 +51,7 @@ namespace StartupController
             // Hide to tray when minimized if the user setting is enabled
             this.Resize += (s, e) =>
             {
-                if (this.WindowState == FormWindowState.Minimized && UserSettingsService.GetStartToTray())
+                if (this.WindowState == FormWindowState.Minimized && _settings.GetStartToTray())
                 {
                     this.Hide();
                     this.ShowInTaskbar = false;
@@ -61,37 +74,36 @@ namespace StartupController
             notifyIcon.ContextMenuStrip.Items.Add(openLogsItem);
             btnViewLogs.Click += (s, e) => LoggingService.OpenLogFile();
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
-            chkLaunchToTray.Checked = UserSettingsService.GetStartToTray();
+            chkLaunchToTray.Checked = _settings.GetStartToTray();
             chkLaunchToTray.CheckedChanged += (s, e) =>
             {
-                UserSettingsService.SetStartToTray(chkLaunchToTray.Checked);
+                _settings.SetStartToTray(chkLaunchToTray.Checked);
             };
-            chkSilenceNotifications.Checked = UserSettingsService.GetSilenceNotifications();
+            chkSilenceNotifications.Checked = _settings.GetSilenceNotifications();
             chkSilenceNotifications.CheckedChanged += (s, e) =>
             {
-                UserSettingsService.SetSilenceNotifications(chkSilenceNotifications.Checked);
+                _settings.SetSilenceNotifications(chkSilenceNotifications.Checked);
             };
-            chkLaunchProgramsOnStartup.Checked = UserSettingsService.GetLaunchProgramsOnStartup();
+            chkLaunchProgramsOnStartup.Checked = _settings.GetLaunchProgramsOnStartup();
             chkLaunchProgramsOnStartup.CheckedChanged += (s, e) =>
             {
-                UserSettingsService.SetLaunchProgramsOnStartup(chkLaunchProgramsOnStartup.Checked);
-                StartupRegistryService registryService = new StartupRegistryService();
+                _settings.SetLaunchProgramsOnStartup(chkLaunchProgramsOnStartup.Checked);
                 if (chkLaunchProgramsOnStartup.Checked)
                 {
                     string exePath = Application.ExecutablePath; // or your install path
-                    registryService.AddThisApplicationToStartup(exePath);
+                    _registry.AddThisApplicationToStartup(exePath);
                 }
                 else
                 {
-                    registryService.RemoveThisApplicationFromStartup();
+                    _registry.RemoveThisApplicationFromStartup();
                 }
             };
 
             // autosave checkbox
-            chkAutoSaveOnChange.Checked = UserSettingsService.GetAutoSaveOnChange();
+            chkAutoSaveOnChange.Checked = _settings.GetAutoSaveOnChange();
             chkAutoSaveOnChange.CheckedChanged += (s, e) =>
             {
-                UserSettingsService.SetAutoSaveOnChange(chkAutoSaveOnChange.Checked);
+                _settings.SetAutoSaveOnChange(chkAutoSaveOnChange.Checked);
             };
 
             this.Load += async (s, e) =>
@@ -109,7 +121,7 @@ namespace StartupController
             // handle closing to prompt for unsaved changes
             this.FormClosing += async (s, e) =>
             {
-                if (isDirty)
+                if (_model.IsDirty)
                 {
                     var res = MessageBox.Show("There are unsaved changes. Save before exiting?", "Unsaved Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
                     if (res == DialogResult.Cancel)
@@ -121,7 +133,7 @@ namespace StartupController
                     {
                         await SaveOrderAsync();
                         // If still dirty after save, cancel closing
-                        if (isDirty)
+                        if (_model.IsDirty)
                             e.Cancel = true;
                     }
                 }
@@ -136,20 +148,23 @@ namespace StartupController
             // If autosave is enabled and we are marking dirty, perform immediate save instead of keeping dirty state
             try
             {
-                if (dirty && UserSettingsService.GetAutoSaveOnChange())
+                if (dirty && _settings.GetAutoSaveOnChange())
                 {
                     // trigger save in background and do not set isDirty
                     _ = SaveOrderAsync();
                     return;
                 }
 
-                isDirty = dirty;
+                if (dirty)
+                    _model.MarkDirty();
+                else
+                    _model.MarkClean();
 
                 // visual cue on save button unless autosave is enabled
-                if (isDirty)
+                if (_model.IsDirty)
                 {
                     btnSaveOrder.Enabled = true;
-                    if (!UserSettingsService.GetAutoSaveOnChange())
+                    if (!_settings.GetAutoSaveOnChange())
                     {
                         btnSaveOrder.BackColor = System.Drawing.Color.LightSalmon;
                     }
@@ -167,21 +182,16 @@ namespace StartupController
             catch { }
         }
 
-        private List<StartupProgram> startupPrograms = new List<StartupProgram>();
-
         private async Task LoadStartupPrograms()
         {
             try
             {
                 // Simulate or perform actual registry access asynchronously
-                startupPrograms = await Task.Run(() =>
-                {
-                    StartupRegistryService registryService = new StartupRegistryService();
-                    return registryService.GetStartupPrograms();
-                });
-                //ShowStartupNotification($"Loaded {startupPrograms.Count.ToString()} startup programs.");
+                var programs = await Task.Run(() => _registry.GetStartupPrograms());
+                _model.Load(programs);
+                //ShowStartupNotification($"Loaded {_model.Count} startup programs.");
                 RefreshListView();
-                LoggingService.LogInfo($"Loaded {startupPrograms.Count} startup programs");
+                LoggingService.LogInfo($"Loaded {_model.Count} startup programs");
             }
             catch (Exception ex)
             {
@@ -193,7 +203,7 @@ namespace StartupController
         private void RefreshListView()
         {
             listViewStartup.Items.Clear();
-            foreach (var prog in startupPrograms)
+            foreach (var prog in _model.Programs)
             {
                 var item = new ListViewItem(new[]
                 {
@@ -271,13 +281,32 @@ namespace StartupController
             }
         }
 
+        // The program behind the selected row (via Tag, so it stays correct if the view is sorted)
+        private StartupProgram? SelectedProgram()
+        {
+            if (listViewStartup.SelectedItems.Count == 0) return null;
+            return listViewStartup.SelectedItems[0].Tag as StartupProgram;
+        }
+
+        // Select the row showing this program instance
+        private void SelectProgram(StartupProgram program)
+        {
+            foreach (ListViewItem item in listViewStartup.Items)
+            {
+                if (ReferenceEquals(item.Tag, program))
+                {
+                    item.Selected = true;
+                    return;
+                }
+            }
+        }
+
         private async void ToggleSelectedProgram()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                var prog = listViewStartup.SelectedItems[0].Tag as StartupProgram;
-                prog.Enabled = !prog.Enabled;
+                _model.Toggle(prog);
                 // TODO: Update registry or startup folder asynchronously
                 await Task.Run(() => {/* registry update logic here */});
                 RefreshListView();
@@ -291,11 +320,10 @@ namespace StartupController
         }
         private async void EnableSelectedProgram()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                var prog = listViewStartup.SelectedItems[0].Tag as StartupProgram;
-                prog.Enabled = true;
+                _model.Enable(prog);
                 // TODO: Update registry or startup folder asynchronously
                 await Task.Run(() => {/* registry update logic here */});
                 RefreshListView();
@@ -310,11 +338,10 @@ namespace StartupController
 
         private void DisableSelectedProgram()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                var prog = listViewStartup.SelectedItems[0].Tag as StartupProgram;
-                prog.Enabled = false;
+                _model.Disable(prog);
                 // TODO: Update registry or startup folder
                 RefreshListView();
                 SetDirty(true);
@@ -326,91 +353,27 @@ namespace StartupController
             }
         }
 
-        // Helper: split a registry "run" command into executable path and arguments
-        private static (string exePath, string args) SplitCommand(string command)
-        {
-            if (string.IsNullOrWhiteSpace(command))
-                return ("", "");
-
-            command = command.Trim();
-
-            // If starts with a quote, take the quoted part as the exe path
-            if (command.StartsWith("\""))
-            {
-                var endQuote = command.IndexOf('"', 1);
-                if (endQuote > 0)
-                {
-                    var exe = command.Substring(1, endQuote - 1);
-                    var args = command.Substring(endQuote + 1).Trim();
-                    return (exe, args);
-                }
-            }
-
-            // Try to find a common executable extension (.exe, .bat, .cmd, .com, .lnk)
-            var m = Regex.Match(command, "^(.+?\\.(exe|bat|cmd|com|lnk))(\\s+.*)?$", RegexOptions.IgnoreCase);
-            if (m.Success)
-            {
-                var exe = m.Groups[1].Value;
-                var args = m.Groups[3].Success ? m.Groups[3].Value.Trim() : string.Empty;
-                return (exe, args);
-            }
-
-            // Fallback: split on first space
-            var idx = command.IndexOf(' ');
-            if (idx > 0)
-            {
-                var exe = command.Substring(0, idx);
-                var args = command.Substring(idx + 1).Trim();
-                return (exe, args);
-            }
-
-            return (command, string.Empty);
-        }
-
         private async void LaunchSelectedProgram()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
-            var prog = listViewStartup.SelectedItems[0].Tag as StartupProgram;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                await Task.Run(() =>
+                var result = await Task.Run(() => _launcher.Launch(prog));
+                if (result.Success)
                 {
-                    var (exePath, arguments) = SplitCommand(prog.Path);
-
-                    if (string.IsNullOrEmpty(exePath))
-                        throw new FileNotFoundException("Executable path could not be determined from entry.");
-
-                    if (!File.Exists(exePath))
-                    {
-                        // Try to start using shell (may handle URLs or AppUserModelIDs), but log clearly
-                        LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command: {prog.Path}");
-                        var psiShell = new ProcessStartInfo(prog.Path)
-                        {
-                            UseShellExecute = true
-                        };
-                        LoggingService.LogInfo($"Shell start: Command='{prog.Path}'");
-                        Process.Start(psiShell);
-                    }
-                    else
-                    {
-                        var startInfo = new ProcessStartInfo(exePath)
-                        {
-                            UseShellExecute = true,
-                            WorkingDirectory = Path.GetDirectoryName(exePath),
-                            Arguments = arguments
-                        };
-                        LoggingService.LogInfo($"Process start: Exe='{startInfo.FileName}' Args='{startInfo.Arguments}' WorkingDir='{startInfo.WorkingDirectory}'");
-                        Process.Start(startInfo);
-                    }
-                });
-
-                ShowNotification("Launched: " + prog.Name);
-                LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
-            }
-            catch (FileNotFoundException fnf)
-            {
-                LoggingService.LogLaunchResult(prog.Name, prog.Path, false, fnf.Message);
-                ShowNotification($"Executable not found: {fnf.Message}");
+                    ShowNotification("Launched: " + prog.Name);
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
+                }
+                else if (result.NotFound)
+                {
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
+                    ShowNotification($"Executable not found: {result.Error}");
+                }
+                else
+                {
+                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
+                    ShowNotification($"Failed to launch: {result.Error}");
+                }
             }
             catch (Exception ex)
             {
@@ -422,7 +385,7 @@ namespace StartupController
         public async Task LaunchEnabledProgramsAsync()
         {
             if (!this.LaunchFromStartup) return;
-            var enabledPrograms = startupPrograms.Where(p => p.Enabled).ToList();
+            var enabledPrograms = _model.EnabledPrograms();
             int total = enabledPrograms.Count;
             int current = 1;
 
@@ -430,43 +393,21 @@ namespace StartupController
             {
                 try
                 {
-                    await Task.Run(() =>
+                    var result = await Task.Run(() => _launcher.Launch(prog));
+                    if (result.Success)
                     {
-                        var (exePath, arguments) = SplitCommand(prog.Path);
-
-                        if (string.IsNullOrEmpty(exePath))
-                            throw new FileNotFoundException("Executable path could not be determined from entry.");
-
-                        if (!File.Exists(exePath))
-                        {
-                            // Try to start using shell (may handle URLs or AppUserModelIDs), but log clearly
-                            LoggingService.LogWarning($"Executable not found: {exePath}. Attempting shell start with original command: {prog.Path}");
-                            var psiShell = new ProcessStartInfo(prog.Path)
-                            {
-                                UseShellExecute = true
-                            };
-                            LoggingService.LogInfo($"Shell start: Command='{prog.Path}'");
-                            Process.Start(psiShell);
-                        }
-                        else
-                        {
-                            var startInfo = new ProcessStartInfo(exePath)
-                            {
-                                UseShellExecute = true,
-                                WorkingDirectory = Path.GetDirectoryName(exePath),
-                                Arguments = arguments
-                            };
-                            LoggingService.LogInfo($"Process start: Exe='{startInfo.FileName}' Args='{startInfo.Arguments}' WorkingDir='{startInfo.WorkingDirectory}'");
-                            Process.Start(startInfo);
-                        }
-                    });
-
-                    ShowStartupNotification(prog.Name, current, total);
-                    //LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
-                }
-                catch (FileNotFoundException fnf)
-                {
-                    LoggingService.LogLaunchResult(prog.Name, prog.Path, false, fnf.Message);
+                        ShowStartupNotification(prog.Name, current, total);
+                        //LoggingService.LogLaunchResult(prog.Name, prog.Path, true);
+                    }
+                    else if (result.NotFound)
+                    {
+                        LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
+                    }
+                    else
+                    {
+                        LoggingService.LogLaunchResult(prog.Name, prog.Path, false, result.Error ?? "");
+                        ShowNotification($"Failed to launch {prog.Name}: {result.Error}");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -478,17 +419,13 @@ namespace StartupController
         }
         private void MoveSelectedProgram(int direction)
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                int index = listViewStartup.SelectedItems[0].Index;
-                int newIndex = index + direction;
-                if (newIndex < 0 || newIndex >= startupPrograms.Count) return;
-                var item = startupPrograms[index];
-                startupPrograms.RemoveAt(index);
-                startupPrograms.Insert(newIndex, item);
+                bool moved = direction < 0 ? _model.MoveUp(prog) : _model.MoveDown(prog);
+                if (!moved) return;
                 RefreshListView();
-                listViewStartup.Items[newIndex].Selected = true;
+                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -499,16 +436,12 @@ namespace StartupController
         }
         private void MoveSelectedProgramToTop()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                int index = listViewStartup.SelectedItems[0].Index;
-                if (index <= 0) return; // already at top
-                var item = startupPrograms[index];
-                startupPrograms.RemoveAt(index);
-                startupPrograms.Insert(0, item);
+                if (!_model.MoveTop(prog)) return; // already at top
                 RefreshListView();
-                listViewStartup.Items[0].Selected = true;
+                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -520,16 +453,12 @@ namespace StartupController
 
         private void MoveSelectedProgramToBottom()
         {
-            if (listViewStartup.SelectedItems.Count == 0) return;
+            if (SelectedProgram() is not StartupProgram prog) return;
             try
             {
-                int index = listViewStartup.SelectedItems[0].Index;
-                if (index >= startupPrograms.Count - 1) return; // already at bottom
-                var item = startupPrograms[index];
-                startupPrograms.RemoveAt(index);
-                startupPrograms.Add(item);
+                if (!_model.MoveBottom(prog)) return; // already at bottom
                 RefreshListView();
-                listViewStartup.Items[startupPrograms.Count - 1].Selected = true;
+                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -543,12 +472,9 @@ namespace StartupController
         {
             try
             {
-                // TODO: Persist the order (e.g., to a config file)
-                await Task.Run(() =>
-                {
-                    StartupRegistryService registryService = new StartupRegistryService();
-                    registryService.SaveStartupOrder(startupPrograms.Where(p => p.Enabled).Select(p => p.Name).ToList());
-                });
+                // Snapshot on the UI thread; the background save never touches the live list
+                var snapshot = _model.Snapshot();
+                await Task.Run(() => _registry.SaveStartupOrder(snapshot.EnabledInOrder().ToList()));
                 ShowNotification("Order saved!");
                 LoggingService.LogInfo("Order saved");
                 SetDirty(false);
@@ -570,7 +496,7 @@ namespace StartupController
 
         private void ShowNotification(string text)
         {
-            if (UserSettingsService.GetSilenceNotifications()) return; // Check your setting
+            if (_settings.GetSilenceNotifications()) return; // Check your setting
             notifyIcon.BalloonTipTitle = "Startup Controller";
             notifyIcon.BalloonTipText = text;
             notifyIcon.ShowBalloonTip(3000); // Show for 3 seconds
@@ -579,7 +505,7 @@ namespace StartupController
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            if (UserSettingsService.GetStartToTray()) // Your setting
+            if (_settings.GetStartToTray()) // Your setting
             {
                 this.Hide();
                 this.ShowInTaskbar = false;

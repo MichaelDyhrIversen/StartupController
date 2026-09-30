@@ -3,6 +3,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace StartupController
 {
@@ -32,15 +33,16 @@ namespace StartupController
                 {
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    bool startMinimized = UserSettingsService.GetStartToTray();
-                    var form = new Form1();
+                    var settings = new UserSettings(Registry.CurrentUser);
+                    bool startMinimized = settings.GetStartToTray();
+                    var form = new Form1(settings, new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()));
                     if (startMinimized)
                     {
                         form.WindowState = FormWindowState.Minimized;
                         form.ShowInTaskbar = false;
                         form.Load += (s, e) => form.Hide();
                     }
-                    if(args.Contains("--launch"))
+                    if (args.Contains("--launch"))
                     {
                         form.LaunchFromStartup = true;
                     }

@@ -19,8 +19,9 @@ StartupController is a Windows application that allows users to view, manage, an
 - Allow users to launch any disabled startup program directly from the interface.
 
 ### 3. Enable/Disable Startup Programs
-- Provide controls to enable or disable each program as a startup entry.
-- Changes should be applied locally and reflected in the system's startup configuration.
+- Provide controls to enable or disable each program in the application's own launch list.
+- The application is an add-on to Windows' startup behaviour: it launches, in the saved order, the startup entries that are disabled in Windows (StartupApproved).
+- Enabling or disabling a program in the application changes only the application's launch list. It never changes Windows' startup configuration.
 
 ### 4. Sort Startup Order
 - Allow users to reorder the list of startup programs.
