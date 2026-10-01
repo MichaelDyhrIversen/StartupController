@@ -25,8 +25,10 @@
 - **Entries not listed:** programs that Windows already starts (for example enabled in Task Manager's Startup tab) are not listed, so they are never started twice. To manage one here, disable it in Task Manager first. The app's own entry is never listed.
 - **"Changed – re-enable to launch":** shown when the command of an enabled program changed (for example after an update or reinstall with different data). It is not launched until you enable it again and save. After the next save it shows as Disabled.
 - **Launch:** Select a program and click "Launch" to run it immediately.
-- **Reorder:** Use "Move Up" and "Move Down" to change the order, then "Save Order".
-- **Settings:** Use the checkboxes at the bottom to control notifications, startup behavior, and tray launch.
+- **Run command format:** StartupController starts each program from its Run command. Put the full path in quotes, for example `"C:\Program Files\App\app.exe" --minimized`. Relative paths are not started. "Executable not found" means the command could not be resolved to an existing file, often because an unquoted path with spaces or arguments was used. Quote the path in the Run entry and try again.
+- **Reorder:** Use the arrow buttons (↑ and ↓ to move one step, ⇈ and ⇊ to move to the top or bottom) to change the order, then click "Save Order".
+- **Settings:** Use the checkboxes at the bottom: "Silence Notifications", "Launch Enabled Programs On System Startup", "Launch To Tray" and "Autosave on change".
+- **View Logs:** Click "View Logs" to see what was launched and any errors.
 - **Help:** Click "Help" for usage instructions.
 
 ## Building

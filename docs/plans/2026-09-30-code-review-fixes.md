@@ -36,9 +36,9 @@ The user answered the open questions from the first version of this plan.
 
 The user answered the four open questions after Phase 3 was committed.
 
-- **D8: Allow at most one `--launch` sequence per Windows logon session.** This comes from the Phase 3 security review (L2, option 5). It breaks relaunch loops from entries the self-launch guard can't detect: `cmd /c` wrappers, `.lnk` files and renamed copies. A second `--launch` in the same session logs and exits without launching. Suggested design, to be finalised by the planner: store the session id plus the logon or boot time under `HKCU\Software\StartupController`. Accepted downside: a second manual `--launch` in the same session does nothing. **Not implemented yet.**
+- **D8: Allow at most one `--launch` sequence per Windows logon session.** This comes from the Phase 3 security review (L2, option 5). It breaks relaunch loops from entries the self-launch guard can't detect: `cmd /c` wrappers, `.lnk` files and renamed copies. A second `--launch` in the same session logs and exits without launching. Suggested design, to be finalised by the planner: store the session id plus the logon or boot time under `HKCU\Software\StartupController`. Accepted downside: a second manual `--launch` in the same session does nothing. **Designed in 4.D8 (key: WTS session id plus logon time; fail closed). Not implemented yet.**
 - **D9: Don't verify whether Windows expands `%VAR%` in REG_SZ Run values.** Keep the current Phase 3 behaviour: REG_SZ values are expanded at launch, and REG_EXPAND_SZ values are expanded once at read. The accepted risk (security I1) is that a change to `HKCU\Environment` can redirect a launch without changing the D7 fingerprint. That needs same-user write access, which is the same trust level as `Run`. Document this in SECURITY.md.
-- **D10: Move to .NET 10 (LTS) as Phase 5.** .NET 8 support ends on 2026-11-10. Retarget both projects and check the installer (`SetupStartupController.vdproj`), the NuGet packages and CA1416. **Not started.**
+- **D10: Move to .NET 10 (LTS) as Phase 5.** .NET 8 support ends on 2026-11-10. Retarget both projects and check the installer (`SetupStartupController.vdproj`), the NuGet packages and CA1416. **Planned in Phase 5 (open questions Q5.1-Q5.6 there). Not started.**
 - **D11: The SECURITY.md supported-versions table stays at 1.0.2.** No change is needed.
 
 ## Status and handoff (2026-10-01, end of session)
@@ -55,15 +55,15 @@ Branch `code-review-fixes` (not pushed, not merged to `master`):
 418 tests pass, the build has 0 warnings, and `dotnet format` is clean. The security-analyser verdict is that Phase 3 is OK for release as far as M1 is concerned.
 
 Next steps, in order:
-1. **Planner:** add D8 as a Phase 3 or Phase 4 item with a design and test cases, and add Phase 5 (D10).
-2. **Phase 4 (developer):** cleanup items 8, 15, 17, 18 and 20. Item 18 now also covers security L2 and I3: stop logging command-line arguments (names or the exe path only), escape `\r`, `\n` and `\t` in logged values, and add log rotation. Also: wrap `new Mutex` (done in Phase 3), dead code in Form1 (the commented `AdjustListViewColumns` block, the `#pragma CS8602`), `Program.Form_Load`, `async Task Main`, unused usings, making `LaunchFromStartup` a property, moving `NormalizePath` and its P/Invoke into a path helper, and the optional linear parser scan (I-3).
-3. **D8 implementation (developer)**, then the tester, code-inspector and security-analyser review it.
+1. ~~**Planner:** add D8 as a Phase 3 or Phase 4 item with a design and test cases, and add Phase 5 (D10).~~ **Done (2026-10-01):** D8 is 4.D8, .NET 10 is Phase 5. The Phase 4 table was re-checked against the code, and done items are marked.
+2. **Phase 4 (developer):** see the Phase 4 table for status. Cleanup items 8, 15, 17, 18 and 20. Item 18 now also covers security L2 and I3: stop logging command-line arguments (names or the exe path only), escape `\r`, `\n` and `\t` in logged values, and add log rotation. Also: wrap `new Mutex` (done in Phase 3), dead code in Form1 (the commented `AdjustListViewColumns` block, the `#pragma CS8602`), `Program.Form_Load`, `async Task Main`, unused usings, making `LaunchFromStartup` a property, moving `NormalizePath` and its P/Invoke into a path helper, and the optional linear parser scan (I-3).
+3. **4.D8 implementation (developer)**, after item 17, in its own commit, then the tester, code-inspector and security-analyser review it.
 4. **Documenter:**
    - CHANGELOG and SECURITY.md for Phase 3: the parsing rules (unquoted commands end at the first .exe/.com/.bat/.cmd/.lnk token, quote folders with such extensions, extensionless unquoted commands with arguments give NotFound).
    - SECURITY.md: direct start without the MOTW/zone prompt (I-1); the self-guard residuals (wrappers and renamed copies *anywhere*; the mutex and D8 stop loops); the 30 s `--launch` timeout; D9.
    - The in-app help text in `Form1.cs` (the meaning of Enabled, the Changed status, the salmon Save button, the close prompt).
    - Check the README button names.
-5. **Phase 5 (D10):** .NET 10.
+5. **Phase 5 (D10):** .NET 10. The user answers Q5.1-Q5.6 first. Check installer support for .NET 10 early (it is the long pole), and finish before 2026-11-10.
 6. **Manual UI checks by the user**, still outstanding: start to tray with no flash, tray restore, second start restoring the window, the Launch button disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt Yes/No/Cancel, AutoSave, first-start migration, the Task Manager enable/disable round trip, and `--launch` on a throwaway profile only.
 
 ---
@@ -375,14 +375,202 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 
 ## Phase 4: Low / cleanup
 
-| Item | Files | Change | Tests |
-|---|---|---|---|
-| 8 | `Form1.cs` | `if (item.Tag is not StartupProgram prog) return;` everywhere. Narrow the CS8602 pragma, or replace it with `!`, on the ContextMenuStrip. | Covered by the model tests; not tested directly. |
-| 15 | `Form1.cs` | Cached settings (from 1.2). `Resize` uses the cached value. | `UserSettings` caching: Get after Set returns the new value without re-reading. |
-| 17 | `Form1.cs:2`, `Program.cs` | Remove the unused using, `Form_Load`, and make `Main` synchronous `void`. | Build only. |
-| 18 | `LoggingService.cs` | Size-based rotation (for example 1 MB, keep 3). Replace `\t`, `\r` and `\n` in fields. Log the exe path but mask arguments (`args=<n chars>`). Log `OpenLogFile` failures via `Debug.WriteLine`. Background writing is optional and not required. | Temp-dir log: rotation at the threshold; a field with a tab becomes escaped; arguments are masked. |
-| 20 | `Form1.cs` `RefreshListView` | Keep the selection by program name across the refresh. Use `BeginUpdate/EndUpdate`. | Manual. |
-| 12 | – | Nothing (D6: HKLM/Run32/StartupFolder out of scope). | – |
+Status checked against `code-review-fixes` at 756b828 (planner, 2026-10-01). This list matches handoff step 2. Implement the table first, then 4.D8 as its own commit, because 4.D8 edits the same `Program.Main` lines as item 17.
+
+| Item | Status | Files | Change | Tests |
+|---|---|---|---|---|
+| 8 | **Partly done.** `GetSelectedProgram` uses `Tag as StartupProgram` (`Form1.cs:449`), and no hard casts are left. | `Form1.cs` | Use `is not StartupProgram prog` for any remaining `Tag` access. Remove the `#pragma warning disable/restore CS8602` around the tray menu (`Form1.cs:75-83`): build the `ContextMenuStrip` in a local, add the items, then assign it to `notifyIcon.ContextMenuStrip`. | Build with 0 warnings. |
+| 15 | **Done.** Settings are cached since 1.2. `Resize` (`Form1.cs:59-61`) uses the cached `_settings`. The dead `else` and the empty catch in `SetDirty` went away in the 2.4 rewrite. | – | – | Existing `UserSettings` caching tests. |
+| 16 | **Done in 3.3.** | – | – | – |
+| 17 | **Open.** | `Program.cs`, `Form1.cs` | Remove `Program.Form_Load` (`Program.cs:101-104`). Make `Main` a synchronous `static void Main(string[] args)` (it has no `await`). Remove unused usings: `System.Net.WebSockets` (`Form1.cs:2`), `System.Threading.Tasks` in `Program.cs`, and anything else IDE0005 / `dotnet format` reports. Turn `public bool LaunchFromStartup = false;` (`Form1.cs:11`) into an **internal** property. Internal avoids the WinForms WFO1000 serialization diagnostic on the .NET 9+ SDKs (see Phase 5). | Build only, plus the existing `StartupSession` tests. |
+| 17a | **Open.** Dead code | `Form1.cs` | Delete the commented-out `AdjustListViewColumns` block (`Form1.cs:376` to about `412`). | Build. |
+| 18 | **Open.** Now includes **security L2 and I3**. | `LoggingService.cs`, `LaunchRunner.cs:128` | (a) Never log command-line arguments. `LogLaunchResult` receives the entry name and the **resolved exe path** only, not `program.Path`, which is the raw command with its arguments. Add the resolved exe to `LaunchResult` if it isn't there yet. At most log `args=<n chars>`. (b) `StartSession` (`LoggingService.cs:95-101`) logs only `--launch: yes/no`, not the joined command line. (c) Escape `\r`, `\n`, `\t` and other control characters below 0x20 in every field (`\r`, `\n`, `\t`, `\uXXXX`), so one log call stays on one line. (d) Size-based rotation under the existing `_lock`: at 1 MB, `startupcontroller.log` → `.1.log` → `.2.log`, keep 3 and delete the oldest. Rotation failures are swallowed like write failures. (e) Report `OpenLogFile` failures through `Debug.WriteLine` and a log line. Background writing is optional. | Temp-dir log: rotation at the threshold keeps exactly 3 files. A name containing tab, CR and LF is logged escaped on one line. A launch whose command has the argument `--token=SECRET` logs no `SECRET`. `StartSession` with args `--launch SECRET` logs no `SECRET`. The blocked and timeout paths still log by name only. |
+| 20 | **Open.** | `Form1.RefreshListView` | Keep the selection by program name (OrdinalIgnoreCase) across the refresh, and wrap the refill in `BeginUpdate/EndUpdate`. | Manual: Move Up/Down and Enable keep the moved or toggled row selected. |
+| Mutex wrap | **Done in Phase 3** (I-5, `Program.cs:29-39`). | – | – | Existing. |
+| Path helper | **Open.** | `ProgramLauncher.cs:223-341` → new `PathHelper.cs` and `NativeMethods.cs` | Move `NormalizePath`, `IsSameFile`, `StripDevicePrefix` and the `GetLongPathNameW` / `GetFileInformationByHandle` P/Invokes. Behaviour is unchanged. 4.D8 adds its WTS P/Invokes to the same `NativeMethods`. | The existing `SelfLaunchGuardTests` and `Phase3*Tests` pass unchanged. |
+| I-3 (optional) | **Open.** | `CommandLineParser.cs` | Scan the command once, left to right, instead of rebuilding each prefix. Keep shortest-first, the 32-probe cap and every current result. | The existing parser tests pass unchanged. Add a 32767-character command that finishes quickly. |
+| 12 | Nothing to do (D6: HKLM, Run32 and StartupFolder are out of scope). | – | – | – |
+
+### 4.D8 At most one `--launch` sequence per Windows logon session (D8)
+
+**Goal.** Break relaunch loops that the 3.1a self guard can't see (`cmd /c` wrappers, `.lnk` files, renamed copies). The first `--launch` in a logon session runs the list. Any later `--launch` in the same session logs Info and exits without launching or signalling. This serves PRD "Singleton" and "Registry Usage", and the Run-at-login behaviour (§4/§5 order). The accepted downside (D8) is that a second manual `--launch` in the same session does nothing. The Launch button is unaffected.
+
+**Why Phase 4 and not 3.4.** Phase 3 is committed and reviewed. 4.D8 changes `Program.Main`, which item 17 rewrites (sync `Main`, `LaunchFromStartup` as a property). Doing 17 first keeps the D8 diff small and reviewable.
+
+#### Session key: WTS session id plus WTS logon time
+- Call `WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSSessionInfo (24), out buffer, out bytes)` from `wtsapi32.dll`. Read `WTSINFOW.SessionId` and `WTSINFOW.LogonTime` (a LARGE_INTEGER), then call `WTSFreeMemory(buffer)`. The developer must check the struct layout against `wtsapi32.h` (`WINSTATIONNAME_LENGTH+1`, `DOMAIN_LENGTH+1`, `USERNAME_LENGTH+1` WCHAR arrays, then the five LARGE_INTEGER times).
+- Key text: `v1:{SessionId}:{LogonTime}`, both decimal. Only equality matters, so the clock base or time zone of `LogonTime` is irrelevant.
+- The key is valid only when `SessionId == Process.GetCurrentProcess().SessionId` and `LogonTime > 0`. Otherwise the key is unavailable, and the failure policy below applies.
+- Why this key:
+  - **Sign-out then sign-in, reboot, Fast Startup shutdown** (which signs the user out): each is a new logon with a new `LogonTime`, so the list runs once.
+  - **Fast User Switching:** every user has their own HKCU hive and their own session. Users don't affect each other.
+  - **RDP:** reconnecting to a disconnected session keeps `SessionId` and `LogonTime` (only `ConnectTime` changes), so nothing reruns. Windows doesn't rerun `Run` on reconnect either. A new RDP logon gets a new key.
+  - **Elevation:** elevated and non-elevated processes in the same session get the same key, so an elevated wrapper can't sidestep the guard.
+  - **Sleep, hibernate, lock:** same session, same key.
+- Rejected alternatives:
+  - **Logon LUID** (`GetTokenInformation(TokenStatistics).AuthenticationId`). The elevated half of a split (UAC) token has a different LUID from the filtered half. An elevated wrapper would then look like a new session. LUIDs also restart at boot, so they would need a second component anyway. `LsaGetLogonSessionData` adds `LogonTime` but is still keyed per token.
+  - **Boot time.** It would block the legitimate run after sign-out and sign-in without a reboot, which breaks the requirement. Derived as "now minus `TickCount64`", it also jitters and moves when the clock changes.
+  - **Session id alone.** Ids are reused: the console session is usually 1 or 2 after every boot. Every later logon would be blocked.
+
+#### Storage
+- `HKCU\Software\StartupController\LaunchSession`, REG_SZ, holding the key text. It contains no user data, command or path.
+- Read: absent means no record. A wrong kind, a value longer than 64 characters, or text that doesn't match `^v1:\d{1,10}:\d{1,20}$` counts as **no record**, with one Warning that gives the value name only. A malformed value can only cause one extra run, and it needs same-user write access, which is the same trust level as `Run`.
+- Write: `CreateSubKey(AppRegistryPaths.AppKey)` and then `SetValue("LaunchSession", key, RegistryValueKind.String)`. This replaces a malformed value. No other value under the key is touched.
+- No admin. Migration: the value is absent after an upgrade, so the first `--launch` claims the session. Older builds ignore the value. Uninstall leaves it in place, like the other HKCU values.
+
+#### Seams (all `internal`)
+- `ILogonSessionKeyProvider { string GetCurrentKey(); }`. It throws on failure. The default is `WtsLogonSessionKeyProvider`.
+- `ILaunchSessionStore { string? Read(); void Write(string key); }`. The default is `RegistryLaunchSessionStore(RegistryKey root)`, which does the validation described above. Only `Program.cs` passes `Registry.CurrentUser`. Tests pass the sandbox root. Add it to the composition-root rule in `SandboxGuardTests`.
+- `LaunchSessionGuard(ILogonSessionKeyProvider, ILaunchSessionStore)` with `LaunchClaim TryClaim()`, which returns `Claimed`, `AlreadyLaunched` or `Unavailable` and never throws:
+  1. Get the key. On an exception, empty text or an invalid key → `Unavailable`, with an Error log that gives the exception type.
+  2. Read the stored value. On an exception → `Unavailable`.
+  3. If it equals the key (Ordinal) → `AlreadyLaunched`.
+  4. Write the key. On an exception → `Unavailable`.
+  5. → `Claimed`.
+- A pure `LaunchGate.Decide(bool hasLaunchArg, bool launchSettingOn, Func<LaunchClaim> claim)` returns `StartupAction`: `Normal`, `LaunchAndExit`, `ExitAlreadyLaunched` or `BlockedAndExit`. `claim` is called **only** when both flags are true.
+
+#### Wiring and atomicity
+- In `Program.Main`, inside `if (isNewInstance)` and **before** `CreateActivation`, `Form1` or any UI: create `settings`. If `args` contains `--launch`, read `settings.GetLaunchProgramsOnStartup()` in a try/catch. If the read fails, log an Error and treat the setting as off: nothing is launched, which is fail-closed and the same result as the setting being off. Then call `LaunchGate.Decide`.
+  - `ExitAlreadyLaunched`: `LogInfo("--launch: startup programs were already launched in this logon session; exiting")` and return. There is no form, no tray icon, no activation event and no signal. The mutex is released by the existing `using`.
+  - `BlockedAndExit`: start `Form1` in launch mode with a new internal `LaunchBlocked = true`. In `RunStartupAsync`, launch mode with `LaunchBlocked` skips `LaunchSequenceAsync`. It logs the Error "--launch: nothing launched because the logon session could not be recorded", calls `SafeNotify("Startup programs were not launched automatically. Open StartupController and use Launch.")` and exits after `StartupSession.ExitDelay(..., loadFailed: true)`. This mirrors the load-failure path. Extract this tail into `StartupSession.RunLaunchModeAsync(...)` so it can be tested.
+  - `LaunchAndExit` and `Normal`: unchanged.
+  - Form1's cached `StartupMode` reads the same `UserSettings` instance, which caches values, so Program and Form1 can't disagree about launch mode.
+- **Atomicity:** the claim runs while this process owns `StartupControllerSingletonMutex`, and the process holds it until `Main` returns. Any other instance stays in the `!isNewInstance` branch until then (a `--launch` one exits there, as today, without claiming), so check and record can't interleave. The record is written before `Application.Run`, so it exists before any launch. A loop child either meets the mutex (the parent is still running) or the recorded key (the parent has exited).
+- **The record is written before the list loads.** If the load fails, the session's claim is still used up. Accepted: nothing was launched, the user gets the load-failure balloon, and Launch works. Rejected alternative: record it in `Form1` just before `LaunchSequenceAsync`. That would allow a retry after a failed load, but it splits check and record across two classes and starts the form before we know whether to exit.
+
+#### Failure policy: fail closed
+If the key provider or the registry read or write fails, the result is `Unavailable` and **nothing is launched**. The app logs an Error, shows a balloon and exits. Why:
+- The guard is the last loop breaker for the cases the self guard can't see. When recording fails, it fails the same way for every relaunched child. Failing open would turn a misconfigured wrapper entry into an unbounded loop that launches the whole list every round.
+- Failing closed costs one logon's automatic launch, and the cost is visible: an Error in the log, a balloon, and Manual Launch still works.
+- A failing `HKCU\Software\StartupController` also breaks the settings and order reads, so the app is already degraded in that state.
+- Residual: on a system where WTS always fails (not expected on supported Windows, because the Local Session Manager always runs), automatic launch never happens. Every logon logs an Error. See open questions Q-D8a and Q-D8b.
+
+#### Not affected
+- The Launch button (`LaunchRunner.LaunchManualAsync`) never consults the guard.
+- A start without `--launch`, or with `--launch` and "Launch programs on startup" off, never reads or writes `LaunchSession`.
+- A second instance with `--launch` while the first is running exits as today (`Program.cs:68-72`) without claiming.
+
+#### Open questions for the user (4.D8)
+- **Q-D8a Fail closed (planner recommendation) or fail open** when the logon session can't be identified or recorded? Fail open would launch normally, but then the loop breaker wouldn't work in exactly the state where it is needed.
+- **Q-D8b** If WTS is unavailable, should there be a fallback key (session id plus a boot time rounded to the minute) instead of failing closed? The planner recommends no: it adds an untested path for a case that isn't expected on supported Windows.
+
+**Registry impact:** reads and writes one new HKCU REG_SZ value, `LaunchSession`. No admin. No HKLM. `StartupApproved` and `Run` are not touched.
+
+#### Tests (tester)
+Guard, with a fake provider and `RegistryLaunchSessionStore(sandbox.Root)`:
+1. No value → `Claimed`, and the value is REG_SZ equal to the key.
+2. The value equals the key → `AlreadyLaunched`, and the value is unchanged (same kind and text).
+3. A different key (an earlier logon) → `Claimed`, and the value is overwritten.
+4. Two `TryClaim` calls with the same key → `Claimed`, then `AlreadyLaunched` (parent, then loop child).
+5. The key changes between calls (sign-out/in or reboot) → `Claimed` both times.
+6. Malformed value: REG_DWORD, REG_MULTI_SZ, REG_SZ `garbage`, or a 500-character string → `Claimed`, rewritten as a valid REG_SZ, one Warning that names only `LaunchSession`.
+7. The provider throws, returns empty, or returns a key with the wrong format → `Unavailable`, and the value stays absent.
+8. A fake store whose `Read` throws → `Unavailable`, and `Write` isn't called.
+9. A fake store whose `Write` throws, and the sandbox app key opened read-only → `Unavailable`.
+10. `Software\StartupController` is missing in the sandbox → `Claimed`, and the key is created.
+11. After a claim, the other values under the sandbox app key (`ProgramOrder`, `EnabledPrograms`, `EnabledFingerprints`, settings DWORDs) are byte-identical.
+
+Gate, pure:
+
+12. No `--launch` → `Normal`, and the claim isn't called.
+13. `--launch` with the setting off → `Normal`, and the claim isn't called.
+14. `--launch`, setting on, `Claimed` → `LaunchAndExit`.
+15. `AlreadyLaunched` → `ExitAlreadyLaunched`.
+16. `Unavailable` → `BlockedAndExit`.
+
+Launch mode, through `StartupSession.RunLaunchModeAsync` with a fake starter and notifier:
+
+17. Blocked → no `Start` call, one notification, exit delay equal to `NotificationExitDelay`, one Error logged.
+18. Manual Launch while `LaunchSession` holds the current key → started once (unaffected).
+
+Real provider (read-only, safe to run):
+
+19. `WtsLogonSessionKeyProvider` returns a key in the `v1:` format whose session id equals `Process.GetCurrentProcess().SessionId`, and returns the same value on two calls.
+
+Source guards:
+
+20. `new RegistryLaunchSessionStore(Registry.CurrentUser)` appears only in `Program.cs`.
+21. `LaunchSessionGuard` and `TryClaim` are referenced only from `Program.cs` and the tests, never from `LaunchRunner` or `Form1`.
+
+Manual (user, on a throwaway profile only, per the hard rule):
+- Sign in: the list launches once. Run `StartupController.exe --launch` by hand: nothing launches and an Info line is logged.
+- Sign out and in, or reboot: the list launches once.
+- A second user through Fast User Switching: launches independently.
+- RDP disconnect and reconnect: no rerun.
+
+---
+
+## Phase 5: .NET 10 LTS (D10)
+
+**Open questions for the user. Answer before starting.**
+- **Q5.1 Deployment model.** Framework-dependent (today's model; recommended) or self-contained? Framework-dependent keeps the MSI small, and Microsoft Update patches the runtime. Self-contained (about 60-100 MB) needs no runtime install, but every runtime CVE then needs a rebuild and re-release of a program that runs at every login. Self-contained would also need a publish profile (`Properties/PublishProfiles` is empty).
+- **Q5.2 Installer fallback.** If the installed *Microsoft Visual Studio Installer Projects* extension can't set a .NET 10 launch condition, choose one: (a) remove the launch condition and rely on the apphost's "install .NET" dialog (recommended as a stopgap), or (b) move the installer to WiX or another tool (a separate project).
+- **Q5.3 Ship together?** Should Phase 5 ship in the same release as Phases 1-4 and D8 (recommended: users install the new runtime once, before 2026-11-10), or as its own release?
+- **Q5.4 Stale prerequisite.** The bootstrapper lists **.NET Framework 4.7.2** as a prerequisite (`SetupStartupController.vdproj:45-60` and `77-92`), which the app doesn't use. OK to remove it? (Recommended.)
+- **Q5.5 Minimum OS.** .NET 10 supports only Windows 10 1607 and later, and Windows 11 (check on the supported-OS page). Keep `[assembly: SupportedOSPlatform("windows7.0")]` (recommended: no behaviour change, no new CA1416 warnings), or raise it to `windows10.0.14393`?
+- **Q5.6 Agent prompts.** `.claude/agents/*.md` say ".NET 8 / net8.0-windows". Should they be updated with Phase 5? They are the user's configuration, so no agent edits them unasked.
+
+**EOL check.**
+- .NET 8 (LTS) support ends **2026-11-10**, which matches D10 and `SECURITY.md:38`. That is about six weeks from 2026-10-01.
+- .NET 9 (STS, extended to 24 months) ends the same day, so it isn't an option.
+- .NET 10 (LTS) was released on 2025-11-11 and is supported until November 2028. Check the exact date on the .NET support policy page and put it in SECURITY.md.
+- The build machine already has SDK 10.0.303 and Microsoft.WindowsDesktop.App 10.0.11.
+
+### 5.1 Retarget
+- `StartupController/StartupController.csproj` and `StartupController.Tests/StartupController.Tests.csproj`: `net10.0-windows`.
+- `Properties/AssemblyInfo.cs:7`: update the comment that says net8.0-windows. Keep the attribute (Q5.5).
+- Keep the `RollForward` default (latest patch of 10.0). Optional: add a `global.json` pinning SDK `10.0.300` with `rollForward: latestFeature`, so CI and local builds agree.
+
+### 5.2 Installer (`SetupStartupController/SetupStartupController.vdproj`)
+- **Launch condition** (`:110-121`): ".NET Core" with `IsNETCore=TRUE` and `AllowLaterVersions=FALSE`, plus an `InstallUrl` built from `[NetCoreVerMajorDotMinor]`. The extension takes the version from the project's TFM. After retargeting, rebuild in VS, then check:
+  - in the Launch Conditions editor, it requires the **.NET Desktop Runtime 10.0** (not the base runtime) for **x64** (`TargetPlatform 3:1`, `:234`);
+  - in the built MSI (Orca), the LaunchCondition and AppSearch tables check 10.0.
+  This needs an extension version that knows .NET 10. VS 2026 (v18) is in use. If it doesn't, see Q5.2.
+- **Project output** (`:776`): the cached `SourcePath` is `obj\Debug\net8.0-windows\apphost.exe`. After a rebuild it must say `net10.0-windows`, and a Release MSI must come from Release output. Check this in the built MSI's file table, or by installing and checking the version of `StartupController.dll`.
+- **Prerequisite:** remove .NET Framework 4.7.2 (Q5.4).
+- **Upgrade:** keep the `UpgradeCode`. Bump `ProductVersion` and `ProductCode` (`tools/Update-VdprojVersion.ps1 -UpdateProductCode`). `RemovePreviousVersions=TRUE` (`:217`) then replaces 1.0.x in place. HKCU data (settings, order, `LaunchSession`) is untouched. The Run value `"<path>" --launch` keeps working because the install path doesn't change.
+- Users without the .NET 10 Desktop Runtime are stopped by the launch condition and given the download link. If the runtime is later removed, the apphost shows a ".NET required" dialog at login. Put this in the CHANGELOG and README.
+
+### 5.3 NuGet
+- The app has no package references.
+- The test project uses `coverlet.collector 6.0.4`, `Microsoft.NET.Test.Sdk 17.14.1`, `xunit 2.9.3` and `xunit.runner.visualstudio 3.1.4`. All of them run on net10.0.
+- Run `dotnet list package --outdated` and `dotnet list package --vulnerable --include-transitive`. Bumping to `Microsoft.NET.Test.Sdk` 18.x is optional and goes in its own commit.
+- The .NET 10 SDK audits transitive packages by default (`NuGetAuditMode=all`). New NU1901-NU1904 warnings would break the 0-warnings rule. Fix them by updating, not by suppressing.
+- Keep VSTest for `dotnet test`. Don't opt in to Microsoft.Testing.Platform in this phase.
+
+### 5.4 CA1416 / SupportedOSPlatform
+- `GenerateAssemblyInfo=false`, so the SDK still won't emit the platform attribute. The manual `[assembly: SupportedOSPlatform("windows7.0")]` (`AssemblyInfo.cs:8`) stays.
+- The build must keep 0 CA1416 warnings in both projects. The test project is also `-windows`, so its Registry and WinForms calls stay valid.
+
+### 5.5 Breaking changes to check (.NET 9 and .NET 10 pages, since we skip 9)
+Read learn.microsoft.com/dotnet/core/compatibility/9.0 and /10.0, the Windows Forms, Core libraries and SDK sections. Known points:
+- **BinaryFormatter removed (9.0). Checked, no impact.** The real resx entries are `bytearray.base64` icons (`Form1.resx:124`, `:141`). The `binary.base64` hits (`Form1.resx:22`, `Resources.resx:22`) are the standard resx header comment. There's no Clipboard or drag-and-drop use. Smoke check: the window icon and the tray icon load.
+- **WinForms analyzer WFO1000 (9.0 SDK and later):** it flags public properties on controls and forms that have no serialization configuration. Item 17 makes `LaunchFromStartup` an internal property, and 4.D8's `LaunchBlocked` is internal too. Check that no other public properties on `Form1` trigger it.
+- **WinForms 10:** dark mode (`Application.SetColorMode`) is opt-in, so don't call it. Check the ListView, the NotifyIcon balloons and the tray menu by eye.
+- **Analyzers and formatting:** the 10 SDK raises the default analysis level, so new CA or IDE warnings may appear. Fix them, keep 0 warnings, and rerun `dotnet format --verify-no-changes` (formatter rules may shift).
+- **Registry and Process:** no breaking changes are known for the APIs we use (`RegistryValueOptions.DoNotExpandEnvironmentNames`, `GetValueKind`, `CreateSubKey`, `ProcessStartInfo.UseShellExecute`/`WorkingDirectory`, `Win32Exception` 740). Confirm on the pages. The existing test suite covers them.
+- **Named Mutex and EventWaitHandle:** confirm the `createdNew` semantics and `Local\` naming are unchanged. If .NET 10 adds options for named wait handles restricted to the current user or session, that is a possible later hardening for L-B, not part of this phase.
+- **P/Invoke:** the `DllImport`s (kernel32, plus wtsapi32 from 4.D8) are unaffected.
+
+### 5.6 Steps
+1. Retarget both csproj files and update the AssemblyInfo comment (5.1).
+2. `dotnet build -c Release` with 0 warnings, `dotnet test` all green, `dotnet format --verify-no-changes` clean. Fix any analyzer or WFO findings.
+3. Package checks (5.3).
+4. In VS: rebuild the installer, check the launch condition and project output, remove the 4.7.2 prerequisite, bump the version (5.2).
+5. Commit "Phase 5: .NET 10".
+6. Run the security-analyser on the installer, NuGet CVEs and the runtime change. The documenter updates the docs listed below.
+
+### 5.7 Verification
+- The output `StartupController.runtimeconfig.json` names `Microsoft.WindowsDesktop.App` 10.0.
+- Clean VM with only the .NET 10 Desktop Runtime: install the MSI, start, start to tray, Launch on a throwaway Run entry, and `--launch` on a throwaway profile.
+- VM with only .NET 8: the MSI refuses to install and shows the 10.0 link.
+- Upgrade over the 1.0.2 MSI: one entry in Apps & features, settings and order preserved, and the Run value still points at the installed exe.
+
+### 5.8 Risks
+- The installer extension may not support a .NET 10 launch condition. Mitigation: Q5.2(a). Check this **first**, before the other steps, because it is the long pole for the 2026-11-10 date.
+- Users must install a new runtime. The launch condition blocks a broken install, but CHANGELOG and README must say so clearly.
+- Analyzer and formatter churn can produce a large but mechanical diff. Keep it in the Phase 5 commit and separate from behaviour changes.
+- Phase 5 touches only csproj, AssemblyInfo and vdproj, so it barely conflicts with Phase 4 or 4.D8 and can run in parallel if the schedule needs it.
 
 ---
 
@@ -392,6 +580,8 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 - `README.md` and `StartupController/README.MD`: explain what "Enabled" means in the app compared with Task Manager. Mention that entries enabled in Task Manager don't appear in the list.
 - In-app help (`Form1.ShowHelp`): the same explanation, plus what "Changed – re-enable to launch" means (D7).
 - `CONTRIBUTING.md`: how to run `dotnet test`, and the registry sandbox rule.
+- 4.D8: SECURITY.md (the per-logon-session `--launch` loop breaker; fail closed when the session can't be recorded), PRD Registry Usage (the `LaunchSession` REG_SZ, which holds only a session id and logon time), README and in-app help (a second `--launch` in the same logon session does nothing; Launch still works), CHANGELOG.
+- Phase 5: README and `StartupController/README.MD` (".NET 8" → ".NET 10", runtime download), `PRD.MD:10` platform line, SECURITY.md:38 (the .NET 10 support end date), CONTRIBUTING (SDK 10 needed), CHANGELOG (the new runtime requirement). `.claude/agents/*.md` only if the user agrees (Q5.6).
 
 ## Risks (cross-cutting)
 - Phase 1 changes the `Form1` constructor. The designer needs the parameterless constructor, so keep it.
@@ -400,3 +590,5 @@ Each item can ship alone in the order listed. 2.4 and 2.5 ship together.
 - D7 fails closed: legitimate app updates that rewrite their Run value stop launching until re-enabled. The UI status and CHANGELOG must make this obvious.
 - 3.1a doesn't catch wrapper commands or renamed copies (residual risk).
 - Run `security-analyser` on Phases 2, 3.1, 3.1a, 3.2 and 3.3 (registry, process launch, IPC).
+- 4.D8 fails closed: a registry or WTS failure costs that logon's automatic launch. It is visible (Error log and balloon), and Manual Launch still works. Run `security-analyser` on 4.D8 and on item 18 (logging).
+- Phase 5 depends on the installer extension supporting .NET 10, and the .NET 8 end of support (2026-11-10) is a fixed date.
