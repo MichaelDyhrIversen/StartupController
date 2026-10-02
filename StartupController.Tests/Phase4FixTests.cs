@@ -148,8 +148,8 @@ namespace StartupController.Tests
 
         // ---------- 2. Lone surrogates (security L1) ----------
 
-        // Settles the review disagreement on .NET 8: File.AppendAllText's default UTF-8 encoding throws on a lone
-        // surrogate (so the whole log line was dropped); a non-throwing UTF8Encoding writes U+FFFD instead.
+        // Settles the review disagreement (.NET 8, unchanged on .NET 10): File.AppendAllText's default UTF-8 encoding
+        // throws on a lone surrogate (so the whole log line was dropped); a non-throwing UTF8Encoding writes U+FFFD instead.
         [Fact]
         public void Verdict_DefaultAppendAllText_ThrowsOnALoneSurrogate_NonThrowingEncodingWritesReplacement()
         {

@@ -38,7 +38,7 @@ The user answered the four open questions after Phase 3 was committed.
 
 - **D8: Allow at most one `--launch` sequence per Windows logon session.** This comes from the Phase 3 security review (L2, option 5). It breaks relaunch loops from entries the self-launch guard can't detect: `cmd /c` wrappers, `.lnk` files and renamed copies. A second `--launch` in the same session logs and exits without launching. Suggested design, to be finalised by the planner: store the session id plus the logon or boot time under `HKCU\Software\StartupController`. Accepted downside: a second manual `--launch` in the same session does nothing. **Designed in 4.D8 (key: WTS session id plus logon time; fail closed, no fallback key, confirmed 2026-10-01 as Q-D8a/Q-D8b below). Not implemented yet.**
 - **D9: Don't verify whether Windows expands `%VAR%` in REG_SZ Run values.** Keep the current Phase 3 behaviour: REG_SZ values are expanded at launch, and REG_EXPAND_SZ values are expanded once at read. The accepted risk (security I1) is that a change to `HKCU\Environment` can redirect a launch without changing the D7 fingerprint. That needs same-user write access, which is the same trust level as `Run`. Document this in SECURITY.md.
-- **D10: Move to .NET 10 (LTS) as Phase 5.** .NET 8 support ends on 2026-11-10. Retarget both projects and check the installer (`SetupStartupController.vdproj`), the NuGet packages and CA1416. **Planned in Phase 5. Q5.1-Q5.4 and Q5.6 answered 2026-10-01 (below); Q5.5 still open. Not started.**
+- **D10: Move to .NET 10 (LTS) as Phase 5.** .NET 8 support ends on 2026-11-10. Retarget both projects and check the installer (`SetupStartupController.vdproj`), the NuGet packages and CA1416. **Planned in Phase 5. Q5.1-Q5.6 answered (below). Implemented 2026-10-02, uncommitted; see "Phase 5 implementation notes". The VS installer build checks are still open.**
 - **D11: The SECURITY.md supported-versions table stays at 1.0.2.** No change is needed.
 
 ## Decisions (2026-10-01, D8/Phase 5)
@@ -78,7 +78,21 @@ Next steps, in order:
    - The in-app help text in `Form1.cs` (the meaning of Enabled, the Changed status, the salmon Save button, the close prompt).
    - Check the README button names.
 5. **Phase 5 (D10):** .NET 10, after 4.D8 (committed 46649f5, 2026-10-02), in the same release (Q5.3). All Phase 5 questions are answered. Q5.5: raise the minimum OS to `windows10.0.14393`. Check installer support for .NET 10 early (it is the long pole; fallback per Q5.2), and finish before 2026-11-10. Update `.claude/agents/*.md` in the same phase (Q5.6).
-6. **Manual UI checks by the user**, still outstanding: start to tray with no flash, tray restore, second start restoring the window, the Launch button disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt Yes/No/Cancel, AutoSave, first-start migration, the Task Manager enable/disable round trip, and `--launch` on a throwaway profile only.
+   **Done (2026-10-02, developer, uncommitted):** D10 is implemented. See "Phase 5 implementation notes". Next: the tester, code-inspector and security-analyser review it, the user runs the installer checks in Visual Studio (5.I3), then the Phase 5 commit and the documenter (PRD platform line, CONTRIBUTING).
+   **Status (2026-10-02): Phase 5 is implemented (uncommitted) and in review-fix** after the security review (user decisions L1: the installer folder page is removed and it always installs to Program Files, an admin can still override TARGETDIR; L2: keep the docs wording that the installer checks for the .NET 10 Desktop Runtime, verified by M1, and change it only if M1 fails, then apply Q5.2(a)). Documenter work for Phase 5 is done (PRD platform line, CONTRIBUTING, SECURITY.md L1/I1/I2/mutex squatting, READMEs).
+6. **Manual UI checks by the user**, still outstanding (see M6 in the Release checklist): start to tray with no flash, tray restore, second start restoring the window, the Launch button disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt Yes/No/Cancel, AutoSave, first-start migration, the Task Manager enable/disable round trip, and `--launch` on a throwaway profile only.
+
+### Release checklist (manual checks before merging to master or releasing)
+
+- **M1: Installer launch condition.** It must be Desktop Runtime 10.0 x64. Check it in the VS Launch Conditions editor and in Orca (LaunchCondition, AppSearch and Property tables). On a VM without .NET 10, the MSI must stop with a download link. If not, apply Q5.2(a) and fix the README and CHANGELOG wording (L2).
+- **M2: Upgrade test in a VM**, 1.0.28 to 1.0.29 and 1.0.2 to 1.0.29. Expect a single Add/Remove Programs entry, no net8 leftovers, `runtimeconfig.json` on net10.0, FileVersion 1.0.29, and settings, order and the Run entry kept. Check the RemoveExistingProducts position in the InstallExecuteSequence in Orca.
+- **M3: Install folder (L1).** After a default install, `icacls "C:\Program Files\StartupController"` shows no user write access, and the installer shows no folder-selection page.
+- **M4: D8 with the TermService service disabled.** It must fail closed, or WTS must work.
+- **M5: D8 manual matrix.** Sign-in launches once, a manual `--launch` does nothing, sign-out/in and reboot each launch once, and Fast User Switching and an RDP reconnect do not rerun it.
+- **M6: Manual UI checks.** Start to tray without a flash, tray restore, a second start restores the window, the Launch button is disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt, AutoSave, first-start migration, the Task Manager enable/disable round trip, the Help dialog, tooltips and arrows, rendering on .NET 10, and the designer not adding a `StartupAction` line.
+- **M7: Release build.** Build the MSI from the Release configuration and check the File table in Orca.
+- **Web check:** someone with web access skims the .NET 9 and .NET 10 breaking-change pages (5.5), and confirms the exact .NET 10 end-of-support date for SECURITY.md (currently "November 2028").
+- **Post-release hardening ideas:** `NamedWaitHandleOptions` for the mutex and event; removing the .NET Framework 4.7.2 prerequisite; bumping the test NuGet packages in a separate commit.
 
 ---
 
@@ -550,7 +564,7 @@ Manual (user, on a throwaway profile only, per the hard rule):
 
 ## Phase 5: .NET 10 LTS (D10)
 
-**Answers (2026-10-01):** Q5.1 framework-dependent. Q5.2 option (a): drop the launch condition if the extension can't target .NET 10. Q5.3 ship with Phases 1-4 and D8. Q5.4 keep the 4.7.2 prerequisite for now. **Q5.5 is still open: ask the user before starting.** Q5.6 update `.claude/agents/*.md` with Phase 5. See "Decisions (2026-10-01, D8/Phase 5)". The original questions are kept below for the record.
+**Answers (2026-10-01):** Q5.1 framework-dependent. Q5.2 option (a): drop the launch condition if the extension can't target .NET 10. Q5.3 ship with Phases 1-4 and D8. Q5.4 keep the 4.7.2 prerequisite for now. Q5.5 (answered 2026-10-02) raise the minimum OS to `windows10.0.14393`. Q5.6 update `.claude/agents/*.md` with Phase 5. See "Decisions (2026-10-01, D8/Phase 5)". The original questions are kept below for the record.
 
 - **Q5.1 Deployment model.** Framework-dependent (today's model; recommended) or self-contained? Framework-dependent keeps the MSI small, and Microsoft Update patches the runtime. Self-contained (about 60-100 MB) needs no runtime install, but every runtime CVE then needs a rebuild and re-release of a program that runs at every login. Self-contained would also need a publish profile (`Properties/PublishProfiles` is empty).
 - **Q5.2 Installer fallback.** If the installed *Microsoft Visual Studio Installer Projects* extension can't set a .NET 10 launch condition, choose one: (a) remove the launch condition and rely on the apphost's "install .NET" dialog (recommended as a stopgap), or (b) move the installer to WiX or another tool (a separate project).
@@ -622,6 +636,68 @@ Read learn.microsoft.com/dotnet/core/compatibility/9.0 and /10.0, the Windows Fo
 - Users must install a new runtime. The launch condition blocks a broken install, but CHANGELOG and README must say so clearly.
 - Analyzer and formatter churn can produce a large but mechanical diff. Keep it in the Phase 5 commit and separate from behaviour changes.
 - Phase 5 touches only csproj, AssemblyInfo, vdproj and `.claude/agents/*.md`, so it barely conflicts with Phase 4 or 4.D8 and can run in parallel if the schedule needs it.
+
+### Phase 5 implementation notes (developer, 2026-10-02, uncommitted)
+
+**5.I1 Retarget.** Both csproj files are `net10.0-windows` (SDK 10.0.303, default roll-forward, no `global.json` added). The output `StartupController.runtimeconfig.json` names `Microsoft.NETCore.App` and `Microsoft.WindowsDesktop.App` 10.0.0. `AssemblyInfo.cs` now has `[assembly: SupportedOSPlatform("windows10.0.14393")]` with an updated comment (Q5.5).
+
+**5.I2 Build findings.**
+- One new diagnostic: **WFO1000** (reported as an error) on `Form1.StartupAction`. The analyzer flags internal settable properties too, not only public ones. Fix: `[DesignerSerializationVisibility(Hidden)]`, the documented fix. The property is runtime state set by `Program.Main`, never designer-serialized. `LaunchFromStartup` and `LaunchBlocked` are get-only and not flagged.
+- No CA1416 warnings after raising the minimum OS. No new CA or IDE findings at analysis level 10. `dotnet format --verify-no-changes` is clean.
+- `dotnet build -c Release` on the solution prints the existing MSB4078 ("vdproj is not supported by MSBuild"), because the Release solution configuration includes the setup project. This isn't new and isn't from Phase 5. Debug has 0 warnings.
+
+**5.I3 Installer (`SetupStartupController.vdproj`).**
+- **Launch condition: kept, not dropped (Q5.2 not triggered so far).** The vdproj stores no .NET version. The launch condition block has only `IsNETCore=TRUE`, `Runtime 2:0`, `Architecture 2:0` and an `InstallUrl` with `[NetCoreVerMajorDotMinor]`. The bundled extension (Microsoft Visual Studio Installer Projects 2.0.1 in `VS 18\Community\Common7\IDE\CommonExtensions\Microsoft\VSI`) reads the version and framework from the project output's `.runtimeconfig.json` at build time (`ReadNetCoreFrameworkDependency`, `HighestNetCoreVersion`, `Microsoft.WindowsDesktop.App` in `Microsoft.VisualStudio.InstallerProjects.dll` and `dpplg.dll`). The install-time custom action (`DPCA.dll`) checks the `VSDNetCoreVersion`/`VSDNetCoreRuntime`/`VSDNetCoreArch` properties. There is no hard-coded list of .NET versions, so it should emit 10.0 automatically. **This couldn't be confirmed from the CLI.** If the VS build or Orca shows anything other than Desktop Runtime 10.0 x64, apply Q5.2: delete the `"{A06ECF26-...}:_6EBC04F332B04AFB948D1C2DFABCAE2F"` block under `ExternalPersistence/LaunchCondition`, and change the CHANGELOG and both READMEs to say the installer doesn't check for the runtime.
+- `ProjectOutput` cached `SourcePath`: `obj\Debug\net8.0-windows\apphost.exe` became `obj\Debug\net10.0-windows\apphost.exe`. VS rewrites this cache on build. There were no other net8 paths in the vdproj.
+- `ProductVersion` 1.0.28 became 1.0.29, matching `GeneratedVersionInfo.cs` (1.0.29). `ProductCode` is now `{BD2C7B99-7004-4F6F-A2B8-F7D9C1BAC623}`, and `PackageCode` is now `{80B05FD5-96E2-4683-B2E8-D5C82BA83098}`. MSI needs a new package code whenever the product code changes. `UpgradeCode` `{E07E5FE3-...}` is unchanged. `RemovePreviousVersions=TRUE` is unchanged. The edits were made by hand, keeping the UTF-8 BOM and CRLF. `tools/Update-VdprojVersion.ps1` was not run.
+- The .NET Framework 4.7.2 bootstrapper prerequisite is unchanged in Debug and Release (Q5.4).
+- Minimum OS: the vdproj has no OS launch condition (no `VersionNT` check, empty `LaunchCondition` section), so there was nothing to raise. On Windows older than 1607, the MSI installs and the .NET 10 runtime check or the apphost refuses to run. Adding a `VersionNT64 >= 1000` condition is possible later, but it wasn't asked for.
+- **To check in Visual Studio:**
+  1. Open the solution, rebuild StartupController (Release), then rebuild SetupStartupController (Release).
+  2. In the Launch Conditions editor, the .NET Core condition should show the .NET Desktop Runtime 10.0 and x64.
+  3. In Orca, the built MSI should show 10.0 in the LaunchCondition, AppSearch and Property tables (`VSDNetCoreVersion`, `VSDNetCoreRuntime`), and `ProductVersion` 1.0.29 with the new ProductCode in Property.
+  4. The File table should show the Release `StartupController.dll`/`.exe` from `net10.0-windows`. In the vdproj after the save, `SourcePath` should name `net10.0-windows`.
+  5. VS may rewrite fields on save (for example `SourcePath` to `obj\Release\...`). Review the vdproj diff before the commit.
+
+**5.I4 NuGet.** The app has no packages. The test packages (`coverlet.collector 6.0.4`, `Microsoft.NET.Test.Sdk 17.14.1`, `xunit 2.9.3`, `xunit.runner.visualstudio 3.1.4`) restore and run on net10.0, so there were no updates. `dotnet list package --vulnerable --include-transitive` reports no vulnerable packages for either project, and there are no NU1901-NU1904 warnings. `--outdated` lists coverlet 10.1.0, Test.Sdk 18.10.1 and runner 4.0.0. Per 5.3, bumping them is optional and goes in its own commit.
+
+**5.I5 Breaking changes (.NET 9 and .NET 10).** The pages couldn't be fetched (no web access in this session). The list below comes from the developer's knowledge of the published breaking-change lists plus checks against this code. The security-analyser or the user should skim the 9.0 and 10.0 pages to confirm.
+- **WinForms:**
+  - WFO1000: fixed (above).
+  - BinaryFormatter removal (9): no impact (5.5).
+  - The Clipboard/DataObject typed APIs and the obsoleted `Clipboard.GetData` (10): not used.
+  - The StatusStrip default renderer change: not used.
+  - The System.Drawing `OutOfMemoryException` to `ExternalException` change (10): no catch depends on it.
+  - Dark mode stays opt-in (no `SetColorMode` call).
+  - Visual check of the ListView, tray menu and balloons is part of the user's manual UI checks.
+- **Registry (`Microsoft.Win32`):** no changes found for `GetValue`/`DoNotExpandEnvironmentNames`, `GetValueKind`, `CreateSubKey` or `SetValue`. Covered by the sandbox tests (all green).
+- **Process:** no changes found for `ProcessStartInfo.UseShellExecute`/`WorkingDirectory` or `Win32Exception` 740. Covered by the fake-starter tests.
+- **P/Invoke:**
+  - The .NET 10 change to `DllImportSearchPath.AssemblyDirectory` (it now searches only the assembly directory) doesn't apply. The `wtsapi32` imports use `DllImportSearchPath.System32`, and `kernel32` is a KnownDLL.
+  - The `WTSINFOW` layout tests (field offsets) pass on net10.0.
+- **System.Text / encoding:** the lone-surrogate behaviour is unchanged. Default `File.AppendAllText` still throws `EncoderFallbackException`, and the non-throwing `UTF8Encoding` still writes U+FFFD. The `Phase4FixTests` verdict test passes, and its comment now says ".NET 8, unchanged on .NET 10".
+- **C# 14 (the default language version on net10.0):**
+  - Neither `field` nor `extension` is used in a way that changes meaning. `extension` appears only as a local name.
+  - First-class span conversions: `ExecutableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)` on a `string[]` may now bind to `MemoryExtensions.Contains(ReadOnlySpan<T>, T, IEqualityComparer<T>)`. The semantics are the same (comparer-based), and it isn't in an expression tree.
+  - No `array.Reverse()` (the only `Reverse()` is on an `IEnumerable` in a test).
+- **Named Mutex/EventWaitHandle:** `createdNew` and `Local\` behave as before (tests green). .NET 10 adds `System.Threading.NamedWaitHandleOptions` (`CurrentUserOnly`, `CurrentSessionOnly`), present in the 10.0.11 ref pack. That is a possible later hardening for L-B (squatting on `Local\StartupControllerActivate` or the mutex). It isn't part of Phase 5.
+- **SDK:**
+  - Transitive NuGet audit: clean.
+  - Analysis level 10: clean.
+  - `dotnet test` still uses VSTest (no MTP opt-in).
+
+**5.I6 Docs (developer part).**
+- SECURITY.md Platform bullet: .NET 10 LTS (supported until November 2028; **the documenter should confirm the exact end date** on the support policy page), framework-dependent, minimum Windows 10 1607. The ".NET 8 ends / move planned" note is removed.
+- CHANGELOG Unreleased/Changed: the runtime and OS requirement and the installer behaviour (launch condition kept).
+- Both READMEs: a Requirements line under Installation, and Building now says .NET 10, C# 14 and VS 2026.
+- Left for the documenter: `PRD.MD:10` platform line and CONTRIBUTING (SDK 10).
+
+**5.I7 Agent prompts (Q5.6).** `.claude/agents/*.md`: only the framework references changed. That's 8 lines: line 8 of each file, plus tester lines 11 and 13. `.claude/` is untracked in git, so these edits don't show in `git diff`.
+
+**5.I8 Verification.**
+- `dotnet build StartupController.sln -c Debug`: 0 warnings, 0 errors.
+- `dotnet format --verify-no-changes`: exit 0.
+- `dotnet test StartupController.sln`: 682/682 passed, 5 runs in a row on net10.0, da-DK culture.
 
 ---
 

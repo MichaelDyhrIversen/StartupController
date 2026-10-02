@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.Win32;
 
 namespace StartupController
@@ -6,6 +7,8 @@ namespace StartupController
     {
         // Set by Program.Main from its --launch decision (4.D8; internal: not a designer-serialized property). Launch
         // mode and LaunchBlocked come from it only; the form doesn't read "Launch programs on startup" for them.
+        // Hidden: runtime-only state, never written to Form1.Designer.cs (WFO1000 on .NET 10).
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         internal StartupAction StartupAction { get; set; } = StartupAction.Normal;
 
         // Launch the list and exit (also when blocked, which launches nothing and shows the blocked balloon)

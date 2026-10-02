@@ -14,6 +14,8 @@
 
 ## Installation
 
+Requirements: Windows 10 version 1607 or later (or Windows 11) and the [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0). The installer checks for the runtime and links to the download if it is missing. Keep the runtime patched: turn on "Receive updates for other Microsoft products" in Windows Update settings so Microsoft Update delivers .NET security fixes, or install them manually.
+
 1. Download the latest release from the [Releases](#) page.
 2. Run the installer and follow the on-screen instructions.
 3. (Optional) The application can be set to run at Windows startup via the settings.
@@ -34,10 +36,10 @@
 
 ## Building
 
-This project targets **.NET 8** and uses **C# 12.0**.  
+This project targets **.NET 10** and uses **C# 14**.  
 To build from source:
 
-1. Open the solution in Visual Studio 2022 or later.
+1. Open the solution in Visual Studio 2026 or later (the .NET 10 SDK is required).
 2. Restore NuGet packages if prompted.
 3. Build and run the solution.
 

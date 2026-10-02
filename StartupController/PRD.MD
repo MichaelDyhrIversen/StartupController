@@ -7,7 +7,7 @@ StartupController
 StartupController is a Windows application that allows users to view, manage, and launch disabled startup programs. The application provides an intuitive interface for enabling/disabling startup entries, launching them individually, and sorting their startup order.
 
 ## Target Platform
-- Windows Desktop (.NET 8)
+- Windows Desktop (.NET 10), minimum Windows 10 version 1607
 
 ## Features
 

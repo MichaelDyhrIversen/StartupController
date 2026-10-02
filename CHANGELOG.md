@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Fail closed: if the session can't be identified or recorded, or "Launch programs on startup" can't be read, `--launch` launches nothing. It logs "--launch blocked: nothing launched", shows one balloon ("Startup programs were not launched automatically. Open StartupController and use Launch.") and exits after about 4 seconds. No window opens at login.
 
 ### Changed
+- **Requires the .NET 10 Desktop Runtime (x64) and Windows 10 version 1607 or later.** The app now targets .NET 10 (LTS) instead of .NET 8, whose support ends on 2026-11-10. Install the .NET 10 Desktop Runtime before upgrading. Windows 7, 8 and 8.1 are no longer supported.
+  - The installer checks for the .NET 10 Desktop Runtime and stops with a download link if it is missing. Upgrading replaces the previous version in place. Settings, order and the startup entry are kept.
+  - If the runtime is removed later, Windows shows a ".NET required" dialog when StartupController starts.
+- **The installer always installs to Program Files.** The folder selection page is gone. A folder that other users can write to would let them replace the program, and it runs at your login. The page also held the "Everyone / Just me" choice, so the Start menu shortcut is now created for the installing user only.
 - **Run command parsing (behaviour change).** A Run value is split into program and arguments as follows:
   - Quoted paths are used as written. Quote any path that contains spaces.
   - An unquoted command ends at the first token ending in .exe, .com, .bat, .cmd or .lnk. A folder name that contains one of these extensions must be quoted.
