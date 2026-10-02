@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Uninstall helper (D-T3): StartupController.ReturnToWindows.exe, run by the MSI's Uninstall custom action.
+    The installer ships the net462 Release build (bin\Release\net462, see the vdproj File entry; the setup project is
+    built only in the Release solution configuration). .NET Framework 4.6.2+ is part of every supported Windows and
+    can't be uninstalled, so the helper still runs after the .NET 10 runtime was removed. The net10.0-windows build
+    exists only so StartupController.Tests can reference the logic. Code here and in the linked files must compile on
+    both targets (no Convert.ToHexString, no FrozenSet, no ValueTuple).
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFrameworks>net462;net10.0-windows</TargetFrameworks>
+    <AssemblyName>StartupController.ReturnToWindows</AssemblyName>
+    <RootNamespace>StartupController.Uninstall</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- Implicit usings would add System.Net.Http, which net462 doesn't reference -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- What the linked app files expect from the app's implicit usings; helper files add their own -->
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="StartupController.Tests" />
+  </ItemGroup>
+
+  <!-- Shared with the app, so the app and the uninstaller can't drift -->
+  <ItemGroup>
+    <Compile Include="..\StartupController\AppRegistryPaths.cs" Link="Shared\AppRegistryPaths.cs" />
+    <Compile Include="..\StartupController\StartupApprovedState.cs" Link="Shared\StartupApprovedState.cs" />
+    <Compile Include="..\StartupController\TakeoverRecord.cs" Link="Shared\TakeoverRecord.cs" />
+    <Compile Include="..\StartupController\LogEscape.cs" Link="Shared\LogEscape.cs" />
+    <Compile Include="..\StartupController\FingerprintHash.cs" Link="Shared\FingerprintHash.cs" />
+  </ItemGroup>
+
+</Project>

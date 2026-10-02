@@ -24,6 +24,7 @@ namespace StartupController.Tests.Infrastructure
         public const string ProgramOrderValue = "ProgramOrder";
         public const string EnabledProgramsValue = "EnabledPrograms";
         public const string EnabledFingerprintsValue = "EnabledFingerprints";
+        public const string TakenOverValue = "TakenOverPrograms";
 
         // Test classes run in parallel: creating a sandbox while another one deletes the shared parent
         // key fails with "marked for deletion", so both go through this lock.
@@ -153,6 +154,13 @@ namespace StartupController.Tests.Infrastructure
             key.SetValue(name, value, RegistryValueKind.Binary);
         }
 
+        /// <summary>StartupApproved value of any kind (e.g. a wrong-kind REG_SZ or REG_DWORD).</summary>
+        public void SeedApprovedValue(string name, object value, RegistryValueKind kind)
+        {
+            using var key = CreateChild(ApprovedPath);
+            key.SetValue(name, value, kind);
+        }
+
         /// <summary>Creates the Run / StartupApproved\Run key without values.</summary>
         public void CreateRunKey() => CreateChild(RunPath).Dispose();
 
@@ -189,6 +197,20 @@ namespace StartupController.Tests.Infrastructure
             return key.GetValueNames()
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .Select(n => (n, key.GetValueKind(n), key.GetValue(n, null, RegistryValueOptions.DoNotExpandEnvironmentNames)))
+                .ToList();
+        }
+
+        /// <summary>ReadAllValues as "name|kind|data" lines (byte[] as hex, string[] joined), for comparisons by value.</summary>
+        public List<string> Dump(string subPath)
+        {
+            return ReadAllValues(subPath)
+                .Select(v => v.Name + "|" + v.Kind + "|" + (v.Data switch
+                {
+                    byte[] bytes => Convert.ToHexString(bytes),
+                    string[] strings => "[" + string.Join("][", strings) + "]",
+                    null => "<null>",
+                    _ => v.Data.ToString()
+                }))
                 .ToList();
         }
 

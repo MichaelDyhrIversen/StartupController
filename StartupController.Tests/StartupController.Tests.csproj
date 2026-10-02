@@ -22,6 +22,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\StartupController\StartupController.csproj" />
+    <!-- The uninstall helper's net10 build. Aliased: it links StartupApprovedState, TakeoverRecord, LogEscape and
+         AppRegistryPaths from the app, so its internal types would otherwise clash with the app's. -->
+    <ProjectReference Include="..\StartupController.Uninstall\StartupController.Uninstall.csproj" Aliases="Uninstall" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,153 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+
+  <!--
+    Per-machine install to Program Files\StartupController (admin-writable only, see SECURITY.md L1). There is no
+    folder-selection page, and the folder's Id is mixed case, so it is a private property that msiexec can't override
+    from the command line. The version comes from StartupController.dll; the UpgradeCode is the one the Visual Studio
+    setup project used, so a newer MSI replaces an older one.
+  -->
+  <Package Name="StartupController"
+           Manufacturer="QCompany"
+           Version="!(bind.FileVersion.AppDll)"
+           UpgradeCode="E07E5FE3-DAA3-4BDC-88E1-2DBAC1283197"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="StartupController" />
+
+    <!--
+      AllowSameVersionUpgrades: a rebuild with the same version replaces the installed one (old product removed first,
+      so every file is replaced) instead of installing side by side. Windows Installer ignores the 4th version field,
+      so releases must raise field 1, 2 or 3.
+    -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Unable to install because a newer version of this product is already installed." />
+
+    <!-- Per-machine only: ALLUSERS="" on the command line would make a per-user product that upgrades can't find -->
+    <Launch Condition="Installed OR ALLUSERS=1" Message="StartupController can only be installed for all users." />
+
+    <!--
+      An old Visual Studio setup build installed "Just me" (per-user) is invisible to MajorUpgrade, which only finds
+      per-machine products. Both would own Program Files\StartupController, and removing the old one later would
+      delete this install's files. Its component GUIDs (favicon.ico, StartupController.dll) were the same in every
+      vdproj build, so finding either one means an old install the upgrade won't remove. A per-machine old install
+      (WIX_UPGRADE_DETECTED) is upgraded normally.
+    -->
+    <Property Id="OLDVDPROJICON">
+      <ComponentSearch Guid="0735942B-5188-00A4-349C-66FE752EB0A5" Type="file" />
+    </Property>
+    <Property Id="OLDVDPROJDLL">
+      <ComponentSearch Guid="11CEEC4D-7223-A4A2-7CAD-277722CA64BC" Type="file" />
+    </Property>
+    <Launch Condition="Installed OR WIX_UPGRADE_DETECTED OR NOT (OLDVDPROJICON OR OLDVDPROJDLL)"
+            Message="An older StartupController installed for this user only is still installed. Uninstall it first (Settings &gt; Apps &gt; Installed apps), then run this setup again." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPCONTACT" Value="Michael Dyhr Iversen" />
+    <Property Id="ARPCOMMENTS" Value="Enables activation of programs in order" />
+    <Property Id="ARPURLINFOABOUT" Value="www.qcompany.dk" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- .NET 10 Desktop Runtime (x64). Not checked on uninstall: the helper is net462 and runs without it. -->
+    <netfx:DotNetCompatibilityCheck Property="DOTNETDESKTOP10" RuntimeType="desktop" Platform="x64" Version="10.0.0" RollForward="minor" />
+    <Launch Condition="Installed OR DOTNETDESKTOP10=&quot;0&quot;"
+            Message="StartupController needs the .NET 10 Desktop Runtime (x64). Install it from https://dotnet.microsoft.com/download/dotnet/10.0 and run this setup again." />
+
+    <!-- 0 leaves taken-over programs disabled on uninstall, 1 returns them without a question (README, Uninstalling) -->
+    <Property Id="RETURNTOWINDOWS" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="AppInstallFolder" Name="StartupController" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="StartupController" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="AppInstallFolder">
+      <Component>
+        <File Id="AppExe" Source="$(var.AppDir)StartupController.exe" KeyPath="yes">
+          <Shortcut Id="AppMenuShortcut" Directory="AppMenuFolder" Name="StartupController"
+                    WorkingDirectory="AppInstallFolder" Icon="AppIcon.ico" Advertise="no" />
+        </File>
+        <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+      </Component>
+      <Component>
+        <File Id="AppDll" Source="$(var.AppDir)StartupController.dll" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(var.AppDir)StartupController.deps.json" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(var.AppDir)StartupController.runtimeconfig.json" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(var.IconFile)" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Id="ReturnToWindowsExe" Source="$(var.HelperDir)StartupController.ReturnToWindows.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="StartupController" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+
+    <!--
+      Uninstall helper (D-T3). Impersonate="yes" runs it as the uninstalling user, so HKCU is that user's hive (as
+      LocalSystem it would see the wrong HKCU). Return="ignore" means the helper can never fail or roll back an
+      uninstall. Deferred and before RemoveFiles, so the exe still exists. Not run during a major upgrade.
+      tools\Patch-UninstallCustomAction.ps1 -Verify checks all of this after every build.
+    -->
+    <CustomAction Id="ReturnToWindows"
+                  FileRef="ReturnToWindowsExe"
+                  ExeCommand="--uilevel [UILevel] --choice &quot;[RETURNTOWINDOWS]&quot;"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ReturnToWindows" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <UIRef Id="StartupControllerUI" />
+  </Package>
+
+  <!--
+    WixUI_Minimal without the license page: Welcome, Ready to install, Progress, Finished (what the Visual Studio
+    setup project showed). Running the MSI again offers Repair and Remove.
+  -->
+  <Fragment>
+    <UI Id="StartupControllerUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="1" Condition="NOT Installed OR PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+
+</Wix>

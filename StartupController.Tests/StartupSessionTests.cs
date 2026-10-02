@@ -29,7 +29,7 @@ namespace StartupController.Tests
             var model = new StartupListModel();
             var notifier = new FakeNotifier();
 
-            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), model, notifier, Inline);
+            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), model, notifier, takeOver: false, Inline);
 
             Assert.False(loaded);
             Assert.Equal(0, model.Count);
@@ -43,7 +43,7 @@ namespace StartupController.Tests
             var root = _sandbox.OpenReadOnlyRoot();
             root.Dispose();
 
-            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), new StartupListModel(), new ThrowingNotifier(), Inline);
+            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), new StartupListModel(), new ThrowingNotifier(), takeOver: false, Inline);
 
             Assert.False(loaded);
         }
@@ -56,7 +56,7 @@ namespace StartupController.Tests
             var model = new StartupListModel();
             var notifier = new FakeNotifier();
 
-            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(_sandbox.Root), model, notifier, Inline);
+            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(_sandbox.Root), model, notifier, takeOver: false, Inline);
 
             Assert.True(loaded);
             Assert.Equal("A", Assert.Single(model.Programs).Name);

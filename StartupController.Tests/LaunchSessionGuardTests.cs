@@ -557,7 +557,7 @@ namespace StartupController.Tests
             var delays = new List<TimeSpan>();
             var model = new StartupListModel();
 
-            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), model, notifier,
+            bool loaded = await StartupSession.LoadProgramsAsync(new StartupRegistryService(root), model, notifier, takeOver: false,
                 read => Task.FromResult(read()), notifyFailure: false);
             await StartupSession.RunLaunchModeAsync(Runner(starter, notifier), model.EnabledPrograms(), loaded, blocked: true,
                 notificationsSilenced: false, notifier, d => { delays.Add(d); return Task.CompletedTask; });

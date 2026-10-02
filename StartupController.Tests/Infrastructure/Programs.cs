@@ -13,6 +13,12 @@ namespace StartupController.Tests.Infrastructure
             Description = ""
         };
 
+        /// <summary>The app path the takeover tests seed as StartupController's own Run entry ("C:\x\StartupController.exe" --launch).</summary>
+        public const string TestAppExe = @"C:\x\StartupController.exe";
+
+        /// <summary>Own-entry check for StartupRegistryService in tests: the parsed exe is TestAppExe.</summary>
+        public static bool IsTestApp(string exePath) => string.Equals(exePath, TestAppExe, StringComparison.OrdinalIgnoreCase);
+
         public static List<StartupProgram> List(params string[] names) => names.Select(n => P(n)).ToList();
 
         public static byte[] Approved(byte first, int length = 12)

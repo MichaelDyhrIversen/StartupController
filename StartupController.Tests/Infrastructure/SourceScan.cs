@@ -23,6 +23,9 @@ namespace StartupController.Tests.Infrastructure
 
         public static string ProductionSourceDirectory() => Path.Combine(RepoRoot(), "StartupController");
 
+        /// <summary>The uninstall helper (StartupController.ReturnToWindows.exe) sources.</summary>
+        public static string UninstallSourceDirectory() => Path.Combine(RepoRoot(), "StartupController.Uninstall");
+
         /// <summary>All .cs files below the directory, excluding bin/ and obj/.</summary>
         public static IEnumerable<string> SourceFiles(string directory)
         {

@@ -116,9 +116,10 @@ Example:
 
 ## Tests & continuous integration
 This is a C# project. Use dotnet commands to build and test:
-Requirements: the .NET 10 SDK is required (the repo builds with SDK 10.0.x). Building the MSI additionally needs Visual Studio 2026 with the Microsoft Visual Studio Installer Projects extension.
+Requirements: the .NET 10 SDK is required (the repo builds with SDK 10.0.x). The MSI (WiX Toolset 6, restored from NuGet) needs nothing else, but must be built on x64.
 Build: dotnet build
 Run tests: dotnet test
+Installer: `dotnet build SetupStartupController -c Release` (VS Code task "Build installer (MSI)"). The solution builds it only in Release, so Debug `dotnet build`/`dotnet test` skip it. After linking it runs `tools/Patch-UninstallCustomAction.ps1 -Verify` on the MSI and fails the build (deleting the MSI) if the uninstall custom action is wrong. A new file in the app's publish output must be added to `Package.wxs` and `ExpectedAppFile` in the wixproj, or the build fails. See README.md, Building.
 xUnit string assertions must use `StringComparison.Ordinal` (culture-sensitive comparisons broke on da-DK); a guard test enforces this.
 Add tests for bug fixes and new features. Tests should be deterministic and fast where possible.
 Ensure CI (GitHub Actions or other) passes before requesting a final review.

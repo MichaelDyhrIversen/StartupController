@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Win32;
 
 namespace StartupController
@@ -13,12 +11,8 @@ namespace StartupController
 
         // Lowercase hex SHA-256 of the UTF-16LE bytes of "{kind}\0{raw}": the value kind (e.g. "String",
         // "ExpandString") and the raw, unexpanded Run string. Including the kind makes a REG_SZ <-> REG_EXPAND_SZ
-        // switch (which changes what runs) count as Changed.
-        internal static string Compute(RegistryValueKind kind, string raw)
-        {
-            var input = kind.ToString() + "\0" + raw;
-            return Convert.ToHexString(SHA256.HashData(Encoding.Unicode.GetBytes(input))).ToLowerInvariant();
-        }
+        // switch (which changes what runs) count as Changed. Shared with the uninstall helper (FingerprintHash).
+        internal static string Compute(RegistryValueKind kind, string raw) => FingerprintHash.Compute(kind, raw);
 
         // The command to launch and its fingerprint, both derived from ONE read of the Run value, so the
         // approved hash always describes exactly what is launched. REG_EXPAND_SZ is expanded here (the same

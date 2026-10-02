@@ -364,15 +364,24 @@ namespace StartupController
         {
             // The session header is logged by Program.Main, before the --launch decision
             LoggingService.LogInfo("Loading startup programs");
+            bool takeOver = StartupSession.TakeoverRequested(_settings);
             // A blocked --launch start shows only its blocked balloon, not a second one for a failed load
-            bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this, notifyFailure: !LaunchBlocked);
+            bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this, takeOver, notifyFailure: !LaunchBlocked);
             if (loaded)
                 RefreshListView();
 
-            if (!IsLaunchMode) return;
+            if (!IsLaunchMode)
+            {
+                // D-T6: taken-over programs that start nowhere get a warning, even with notifications silenced
+                var warning = await StartupSession.CheckStrandedTakeoverAsync(_registry);
+                if (warning != null)
+                    ShowWarningBalloon(warning);
+                return;
+            }
 
-            // Waits before returning so the last balloon can show: Application.Exit disposes the tray icon
-            await StartupSession.RunLaunchModeAsync(_runner, _model.EnabledPrograms(), loaded, LaunchBlocked,
+            // Waits before returning so the last balloon can show: Application.Exit disposes the tray icon.
+            // Entries taken over in this load are not launched: Windows has already started them this logon.
+            await StartupSession.RunLaunchModeAsync(_runner, StartupSession.LaunchableAtLogon(_model.EnabledPrograms()), loaded, LaunchBlocked,
                 _settings.GetSilenceNotifications(), this);
             Application.Exit();
         }
@@ -579,18 +588,27 @@ namespace StartupController
         // escapes so the file's encoding can't break them: \u2191 \u2193 \u21C8 \u21CA are the arrow buttons, \u2013 an en dash.
         internal const string HelpText =
             "Which programs are listed\n" +
-            "Programs in your Run key that are disabled in Windows (Task Manager > Startup apps). Programs Windows " +
-            "already starts are not listed, so nothing starts twice. To manage one here, disable it in Task Manager first. " +
-            "StartupController's own entry is never listed.\n\n" +
+            "Every program in your Run key. Windows doesn't order startup programs, so StartupController takes over the ones " +
+            "Windows starts itself: it disables each one in Windows (Task Manager > Startup apps shows it as Disabled), lists it as " +
+            "Enabled and adds it at the end of the list. Programs the list already knows keep their position. It does this each time it " +
+            "loads, but only while \"Launch Enabled Programs On System Startup\" is checked and StartupController's own startup entry is " +
+            "enabled in Windows. The first login after a takeover is still started by Windows; from the next login " +
+            "StartupController starts the program, in your order, so nothing starts twice. StartupController's own entry is never listed.\n\n" +
             "Enabled and Disabled\n" +
             "Enabled means StartupController launches the program when you log in, in the order of the list " +
             "(with \"Launch Enabled Programs On System Startup\" checked). Use Enable, Disable or double-click a row. " +
-            "Windows' own startup settings are never changed.\n\n" +
+            "Disabled means the program doesn't start at all: Windows no longer starts it and StartupController doesn't either. " +
+            "At login StartupController can't show a UAC prompt, so programs that need administrator rights aren't started then; " +
+            "the Launch button still asks for permission.\n\n" +
+            "Taking over and uninstalling\n" +
+            "If a taken-over program would start nowhere (StartupController's own entry is missing or disabled), a warning balloon " +
+            "tells you, even with notifications silenced. Uninstalling StartupController asks whether to give all taken-over programs " +
+            "back to Windows.\n\n" +
             "Order\n" +
             "\u2191 and \u2193 move the selected program one step, \u21C8 and \u21CA move it to the top or bottom. " +
             "Click Save Order to keep the order and the Enabled settings. With \"Autosave on change\" every change is saved right away.\n\n" +
             "\"Changed \u2013 re-enable to launch\"\n" +
-            "The program's command changed since you enabled it (for example after an update). It is not launched " +
+            "The program's command changed since you enabled it (for example after an update). Nothing launches it " +
             "until you enable it again and save. After the next save it shows as Disabled.\n\n" +
             "Run command format\n" +
             "Put the full path in quotes, for example \"C:\\Program Files\\App\\app.exe\" --minimized. Relative paths " +
@@ -648,6 +666,14 @@ namespace StartupController
             notifyIcon.BalloonTipTitle = "Startup Controller";
             notifyIcon.BalloonTipText = text;
             notifyIcon.ShowBalloonTip(3000); // Show for 3 seconds
+        }
+
+        // Non-blocking warning that is shown even with notifications silenced (D-T6)
+        private void ShowWarningBalloon(string text)
+        {
+            if (IsDisposed || Disposing) return;
+            LoggingService.LogInfo("Warning shown: taken-over programs will not start at logon");
+            notifyIcon.ShowBalloonTip(10000, "Startup Controller", text, ToolTipIcon.Warning);
         }
     }
 }

@@ -6,6 +6,10 @@ namespace StartupController
     public interface IProgramLauncher
     {
         LaunchResult Launch(StartupProgram program);
+
+        // --launch at logon: like Launch, but a program that needs elevation is not started (no UAC prompt at logon,
+        // as Explorer does for Run entries). No default implementation: every launcher must decide (fail closed).
+        LaunchResult LaunchAtLogon(StartupProgram program);
     }
 
     // Outcome of a single launch attempt.
@@ -40,18 +44,26 @@ namespace StartupController
         private readonly string _selfExePath;
         private readonly Func<string, string> _normalizePath;
         private readonly Func<string, string, bool> _sameFile;
+        private readonly Func<string, bool> _shortcutRunsAsAdmin;
 
         // selfExePath: this app's executable. normalizePath: full path with 8.3 short names expanded.
         // sameFile: true when two paths are the same file on disk (hardlinks, subst, UNC aliases). Tests fake both.
-        public ProgramLauncher(IProcessStarter starter, string selfExePath, Func<string, string>? normalizePath = null, Func<string, string, bool>? sameFile = null)
+        // shortcutRunsAsAdmin: true when a .lnk has "Run as administrator" set (default: ShortcutRunsAsAdmin).
+        public ProgramLauncher(IProcessStarter starter, string selfExePath, Func<string, string>? normalizePath = null, Func<string, string, bool>? sameFile = null,
+            Func<string, bool>? shortcutRunsAsAdmin = null)
         {
             _starter = starter ?? throw new ArgumentNullException(nameof(starter));
             _selfExePath = selfExePath ?? "";
             _normalizePath = normalizePath ?? PathHelper.NormalizePath;
             _sameFile = sameFile ?? PathHelper.IsSameFile;
+            _shortcutRunsAsAdmin = shortcutRunsAsAdmin ?? ShortcutRunsAsAdmin;
         }
 
-        public LaunchResult Launch(StartupProgram program)
+        public LaunchResult Launch(StartupProgram program) => Launch(program, allowElevation: true);
+
+        public LaunchResult LaunchAtLogon(StartupProgram program) => Launch(program, allowElevation: false);
+
+        private LaunchResult Launch(StartupProgram program, bool allowElevation)
         {
             string? exePath = null;
             string? shownExe = null;  // what may be logged or shown for exePath (see LoggableExe)
@@ -92,7 +104,8 @@ namespace StartupController
                     if (!_starter.FileExists(exePath))
                         return new LaunchResult(false, NotFound: true, Error: $"Executable not found: {shownExe}", ExePath: shownExe);
 
-                    StartExisting(exePath, parsed.Arguments);
+                    if (!StartExisting(program, exePath, parsed.Arguments, allowElevation))
+                        return new LaunchResult(false, Error: "Requires elevation, not started at logon", ExePath: shownExe);
                 }
                 else if (CommandLineParser.IsBareFileName(exePath))
                 {
@@ -181,8 +194,9 @@ namespace StartupController
         }
 
         // .exe/.com: started directly by full path (CreateProcess, no search). If Windows needs elevation, the shell
-        // is used so the UAC prompt appears. Other types (.bat, .cmd, .lnk, ...) go through the shell.
-        private void StartExisting(string exePath, string arguments)
+        // is used so the UAC prompt appears, unless allowElevation is false (--launch at logon): then the program is
+        // not started and false is returned. Other types (.bat, .cmd, .lnk, ...) go through the shell.
+        private bool StartExisting(StartupProgram program, string exePath, string arguments, bool allowElevation)
         {
             var extension = Path.GetExtension(exePath);
             bool direct = extension.Equals(".exe", StringComparison.OrdinalIgnoreCase) || extension.Equals(".com", StringComparison.OrdinalIgnoreCase);
@@ -195,10 +209,17 @@ namespace StartupController
             // Arguments may hold secrets (tokens, passwords): log their length only
             LoggingService.LogInfo($"Process start: Exe='{psi.FileName}' Args=<{psi.Arguments.Length} chars> WorkingDir='{psi.WorkingDirectory}' Shell={psi.UseShellExecute}");
 
+            if (!direct && !allowElevation && extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) && _shortcutRunsAsAdmin(exePath))
+            {
+                // The shell would show a UAC prompt for it at logon
+                LoggingService.LogWarning($"'{program.Name}' requires elevation, not started");
+                return false;
+            }
+
             if (!direct)
             {
                 Start(psi);
-                return;
+                return true;
             }
 
             try
@@ -207,9 +228,47 @@ namespace StartupController
             }
             catch (Win32Exception ex) when (ex.NativeErrorCode == ERROR_ELEVATION_REQUIRED)
             {
+                if (!allowElevation)
+                {
+                    LoggingService.LogWarning($"'{program.Name}' requires elevation, not started");
+                    return false;
+                }
                 LoggingService.LogInfo($"'{exePath}' requires elevation; starting through the shell");
                 psi.UseShellExecute = true;
                 Start(psi);
+            }
+            return true;
+        }
+
+        // MS-SHLLINK header: HeaderSize 0x4C, LinkCLSID 00021401-0000-0000-C000-000000000046, then LinkFlags (little-endian
+        // UInt32 at offset 20). RunAsUser (0x2000, SLDF_RUNAS_USER) is "Run as administrator" in the shortcut's
+        // properties. Only the 24 header bytes are read; a file that can't be read or isn't a shell link gives false
+        // (the shell then decides, as before). A target exe that requires elevation by its manifest is not detected.
+        private const uint SLDF_RUNAS_USER = 0x00002000;
+        private static readonly Guid ShellLinkClsid = new Guid("00021401-0000-0000-C000-000000000046");
+
+        internal static bool ShortcutRunsAsAdmin(string lnkPath)
+        {
+            try
+            {
+                var header = new byte[24];
+                using (var stream = new FileStream(lnkPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    int read = 0;
+                    while (read < header.Length)
+                    {
+                        int n = stream.Read(header, read, header.Length - read);
+                        if (n == 0) return false;
+                        read += n;
+                    }
+                }
+                if (BitConverter.ToUInt32(header, 0) != 0x4C) return false;
+                if (new Guid(new ReadOnlySpan<byte>(header, 4, 16)) != ShellLinkClsid) return false;
+                return (BitConverter.ToUInt32(header, 20) & SLDF_RUNAS_USER) != 0;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 

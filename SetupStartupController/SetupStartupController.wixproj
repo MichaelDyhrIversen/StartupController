@@ -1,0 +1,93 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <!--
+    StartupController MSI (WiX Toolset, SDK-style). Builds with the .NET SDK alone, no Visual Studio:
+
+      dotnet build SetupStartupController -c Release
+
+    Output: SetupStartupController\bin\Release\StartupController.msi. The solution builds it only in Release; building
+    the project directly in Debug also works. In VS Code: Terminal > Run Task > "Build installer (MSI)".
+
+    The build:
+      1. builds the uninstall helper for net462 (it must run after the .NET 10 runtime was removed, see
+         StartupController.Uninstall.csproj) and publishes the app framework-dependent into obj\payload;
+      2. fails if the published app folder holds files Package.wxs doesn't install (a new dependency must be added there);
+      3. links the MSI, then runs tools\Patch-UninstallCustomAction.ps1 -Verify on it. Package.wxs already authors the
+         uninstall custom action correctly (impersonated, exit code ignored, before RemoveFiles), so nothing is
+         patched; the check only proves it. A failed check deletes the MSI, so an unverified MSI is never left behind.
+  -->
+  <PropertyGroup>
+    <OutputName>StartupController</OutputName>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- ICE validation needs the Windows Installer service; keep it on so authoring errors fail the build -->
+    <SuppressValidation>false</SuppressValidation>
+    <!--
+      ICE43/ICE57 want a non-advertised shortcut's component keyed on an HKCU value, in case ProgramMenuFolder is
+      per-user. The package is per-machine (ALLUSERS=1), so it is the all-users Start menu; keying on HKCU would only
+      leave a value in whichever admin's hive ran the install.
+    -->
+    <!-- ICE61 only warns that MajorUpgrade AllowSameVersionUpgrades is on, which Package.wxs wants -->
+    <SuppressIces>ICE43;ICE57;ICE61</SuppressIces>
+
+    <PayloadDir>$(MSBuildProjectDirectory)\obj\payload\$(Configuration)\</PayloadDir>
+    <AppPublishDir>$(PayloadDir)app\</AppPublishDir>
+    <AppProject>$(MSBuildProjectDirectory)\..\StartupController\StartupController.csproj</AppProject>
+    <HelperProject>$(MSBuildProjectDirectory)\..\StartupController.Uninstall\StartupController.Uninstall.csproj</HelperProject>
+    <VerifyScript>$(MSBuildProjectDirectory)\..\tools\Patch-UninstallCustomAction.ps1</VerifyScript>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Netfx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <!-- Build order and restore only; the payload is staged by StageInstallerPayload -->
+  <ItemGroup>
+    <ProjectReference Include="$(AppProject)" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="$(HelperProject)" ReferenceOutputAssembly="false" SetTargetFramework="TargetFramework=net462" />
+  </ItemGroup>
+
+  <!-- Every file the published app folder may contain. Keep in sync with the AppFiles component group in Package.wxs. -->
+  <ItemGroup>
+    <ExpectedAppFile Include="StartupController.exe;StartupController.dll;StartupController.deps.json;StartupController.runtimeconfig.json" />
+  </ItemGroup>
+
+  <Target Name="StageInstallerPayload" BeforeTargets="BeforeBuild" DependsOnTargets="ResolveProjectReferences">
+    <!-- A framework-dependent publish without a RuntimeIdentifier gets the build machine's apphost -->
+    <Error Condition="'$(PROCESSOR_ARCHITECTURE)' != 'AMD64'"
+           Text="The installer is x64 only and must be built on an x64 machine (PROCESSOR_ARCHITECTURE is '$(PROCESSOR_ARCHITECTURE)')." />
+
+    <RemoveDir Directories="$(PayloadDir)" />
+
+    <MSBuild Projects="$(HelperProject)" Targets="Build" Properties="Configuration=$(Configuration);TargetFramework=net462">
+      <Output TaskParameter="TargetOutputs" ItemName="_HelperExe" />
+    </MSBuild>
+
+    <MSBuild Projects="$(AppProject)" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$(AppPublishDir)" />
+
+    <ItemGroup>
+      <_PublishedAppFile Include="$(AppPublishDir)**\*" Exclude="$(AppPublishDir)**\*.pdb" />
+      <_UnexpectedAppFile Include="@(_PublishedAppFile->'%(RecursiveDir)%(Filename)%(Extension)')" Exclude="@(ExpectedAppFile)" />
+      <_MissingAppFile Include="@(ExpectedAppFile)" Condition="!Exists('$(AppPublishDir)%(Identity)')" />
+    </ItemGroup>
+    <Error Condition="'@(_UnexpectedAppFile)' != ''"
+           Text="The published app contains files the installer doesn't install: @(_UnexpectedAppFile). Add them to Package.wxs (AppFiles) and to ExpectedAppFile in SetupStartupController.wixproj." />
+    <Error Condition="'@(_MissingAppFile)' != ''" Text="The published app lacks: @(_MissingAppFile)." />
+
+    <PropertyGroup>
+      <HelperDir>%(_HelperExe.RootDir)%(_HelperExe.Directory)</HelperDir>
+      <DefineConstants>$(DefineConstants);AppDir=$(AppPublishDir);HelperDir=$(HelperDir);IconFile=$(MSBuildProjectDirectory)\..\StartupController\favicon.ico</DefineConstants>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="VerifyUninstallCustomAction" AfterTargets="Build" Condition="'$(OutputType)' == 'Package'">
+    <Exec Command="&quot;$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File &quot;$(VerifyScript)&quot; -Msi &quot;$(TargetPath)&quot; -Verify"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="_VerifyExitCode" />
+    </Exec>
+    <Delete Files="$(TargetPath)" Condition="'$(_VerifyExitCode)' != '0'" />
+    <Error Condition="'$(_VerifyExitCode)' != '0'" Text="The uninstall custom action check failed; $(TargetPath) was deleted." />
+  </Target>
+
+</Project>

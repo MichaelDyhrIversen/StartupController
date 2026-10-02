@@ -129,6 +129,7 @@ namespace StartupController.Tests
         private sealed class ThrowingLauncher : IProgramLauncher
         {
             public LaunchResult Launch(StartupProgram program) => throw new InvalidOperationException("launcher crashed");
+            public LaunchResult LaunchAtLogon(StartupProgram program) => throw new InvalidOperationException("launcher crashed");
         }
     }
 }

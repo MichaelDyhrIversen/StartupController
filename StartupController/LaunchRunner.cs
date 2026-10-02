@@ -44,7 +44,7 @@ namespace StartupController
         {
             LoggingService.LogInfo($"Launch requested: {program.Name}");
             // No timeout: the caller keeps the Launch button disabled until the launch has really finished
-            var result = await RunAsync(program, timeout: null);
+            var result = await RunAsync(program, timeout: null, atLogon: false);
 
             if (result.Blocked)
                 ShowDialog(BlockedMessage);
@@ -63,7 +63,7 @@ namespace StartupController
             for (int i = 0; i < total; i++)
             {
                 var program = programs[i];
-                var result = await RunAsync(program, _launchTimeout);
+                var result = await RunAsync(program, _launchTimeout, atLogon: true);
 
                 if (result.Blocked)
                 {
@@ -93,12 +93,13 @@ namespace StartupController
 
         // Launch (with an optional timeout) plus the per-entry log line: name and parsed exe, never the arguments.
         // Blocked is already logged by the launcher (name only) and gets no LAUNCH line. A timeout has no exe.
-        private async Task<LaunchResult> RunAsync(StartupProgram program, TimeSpan? timeout)
+        // atLogon: the --launch sequence, which never shows a UAC prompt (IProgramLauncher.LaunchAtLogon)
+        private async Task<LaunchResult> RunAsync(StartupProgram program, TimeSpan? timeout, bool atLogon)
         {
             LaunchResult result;
             try
             {
-                var launch = _runInBackground(() => _launcher.Launch(program));
+                var launch = _runInBackground(() => atLogon ? _launcher.LaunchAtLogon(program) : _launcher.Launch(program));
                 if (timeout == null)
                 {
                     result = await launch;
