@@ -4,8 +4,15 @@ namespace StartupController
 {
     public partial class Form1 : Form, INotifier, IMessageDialog
     {
-        // Set by Program.Main when started with --launch (internal: not a designer-serialized property)
-        internal bool LaunchFromStartup { get; set; }
+        // Set by Program.Main from its --launch decision (4.D8; internal: not a designer-serialized property). Launch
+        // mode and LaunchBlocked come from it only; the form doesn't read "Launch programs on startup" for them.
+        internal StartupAction StartupAction { get; set; } = StartupAction.Normal;
+
+        // Launch the list and exit (also when blocked, which launches nothing and shows the blocked balloon)
+        internal bool LaunchFromStartup => LaunchGate.FormFlagsFor(StartupAction).LaunchMode;
+
+        // The logon session or the launch setting couldn't be checked (4.D8): launch mode launches nothing
+        internal bool LaunchBlocked => LaunchGate.FormFlagsFor(StartupAction).LaunchBlocked;
 
         private readonly IUserSettings _settings;
         private readonly IStartupRegistry _registry;
@@ -26,10 +33,18 @@ namespace StartupController
         // ??= is a designer-time safety net.
         private System.ComponentModel.IContainer Components => components ??= new System.ComponentModel.Container();
 
-        // Composition root: the real services (HKCU settings, registry, process starter). Program.Main and the
-        // WinForms designer both use it, so they can't drift apart. Tests use the public overload with fakes.
+        // Composition root: the real services (HKCU settings, registry, process starter). The WinForms designer uses
+        // this one and Program.Main the settings overload below, which composes the same services, so they can't
+        // drift apart. Tests use the public overload with fakes.
         public Form1()
-            : this(new UserSettings(Registry.CurrentUser), new StartupRegistryService(), new ProcessStarter())
+            : this(new UserSettings(Registry.CurrentUser))
+        {
+        }
+
+        // Program.Main passes the settings it already read for the --launch decision, so Program and the form share one
+        // (caching) UserSettings. Launch mode itself comes from StartupAction, not from a second settings read.
+        internal Form1(IUserSettings settings)
+            : this(settings, new StartupRegistryService(), new ProcessStarter())
         {
         }
 
@@ -247,7 +262,7 @@ namespace StartupController
 
         // Read once, at the first show or the start of the startup work (whichever comes first), so visibility and
         // launch-and-exit are decided from the same settings even if a checkbox changes later.
-        // LaunchMode: --launch with "Launch programs on startup" on (launch the list, then exit).
+        // LaunchMode: Program.Main decided launch-and-exit (LaunchFromStartup); no setting is read for it.
         // StartHidden: Start to tray, or launch mode: the window is not shown at startup.
         private (bool LaunchMode, bool StartHidden)? _startupMode;
 
@@ -257,7 +272,7 @@ namespace StartupController
             {
                 if (_startupMode == null)
                 {
-                    bool launchMode = LaunchFromStartup && _settings.GetLaunchProgramsOnStartup();
+                    bool launchMode = LaunchFromStartup;
                     _startupMode = (launchMode, launchMode || _settings.GetStartToTray());
                 }
                 return _startupMode.Value;
@@ -344,24 +359,18 @@ namespace StartupController
 
         private async Task RunStartupAsync()
         {
-            LoggingService.StartSession(Environment.GetCommandLineArgs().Skip(1));
+            // The session header is logged by Program.Main, before the --launch decision
             LoggingService.LogInfo("Loading startup programs");
-            bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this);
+            // A blocked --launch start shows only its blocked balloon, not a second one for a failed load
+            bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this, notifyFailure: !LaunchBlocked);
             if (loaded)
                 RefreshListView();
 
             if (!IsLaunchMode) return;
 
-            if (loaded)
-                await _runner.LaunchSequenceAsync(_model.EnabledPrograms());
-            else
-                LoggingService.LogError("--launch: nothing launched because the startup list could not be loaded");
-
-            // Give the last balloon time to show: Application.Exit disposes the tray icon
-            var delay = StartupSession.ExitDelay(_settings.GetSilenceNotifications(), loadFailed: !loaded);
-            if (delay > TimeSpan.Zero)
-                await Task.Delay(delay);
-            LoggingService.LogInfo("--launch finished, exiting");
+            // Waits before returning so the last balloon can show: Application.Exit disposes the tray icon
+            await StartupSession.RunLaunchModeAsync(_runner, _model.EnabledPrograms(), loaded, LaunchBlocked,
+                _settings.GetSilenceNotifications(), this);
             Application.Exit();
         }
 

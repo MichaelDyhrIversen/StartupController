@@ -1,3 +1,5 @@
+using Microsoft.Win32;
+
 namespace StartupController
 {
     internal static class Program
@@ -36,6 +38,16 @@ namespace StartupController
             {
                 if (isNewInstance)
                 {
+                    // The header comes first, so even an early exit below is logged under its own session
+                    LoggingService.StartSession(args);
+
+                    // Decided while holding the mutex and before the activation event or any UI exist (4.D8), so a
+                    // relaunch loop child either meets the mutex or the recorded logon session
+                    var settings = new UserSettings(Registry.CurrentUser);
+                    var action = DecideStartup(args.Contains("--launch"), settings);
+                    if (action == StartupAction.ExitAlreadyLaunched)
+                        return; // no form, no tray icon, no signal to anyone (DecideStartup logged why)
+
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     // Listen for a second instance before the form exists; early requests wait in the relay
@@ -43,12 +55,10 @@ namespace StartupController
                     var activation = CreateActivation(relay);
                     try
                     {
-                        // The parameterless constructor is the one place the real services are composed.
-                        // Startup visibility (tray, --launch) is decided in Form1.SetVisibleCore.
-                        var form = new Form1
-                        {
-                            LaunchFromStartup = args.Contains("--launch")
-                        };
+                        // Composes the real services around the settings read above. Startup visibility (tray,
+                        // --launch) is decided in Form1.SetVisibleCore. Launch mode comes from the decision only:
+                        // the form never reads "Launch programs on startup" again.
+                        var form = new Form1(settings) { StartupAction = action };
 
                         relay.Attach(form.RequestRestore);
                         Application.Run(form);
@@ -68,6 +78,55 @@ namespace StartupController
                     LoggingService.LogWarning("Second instance could not signal the running instance");
                 }
             }
+        }
+
+        // --launch with "Launch programs on startup" on claims the logon session (at most one --launch sequence per
+        // session, 4.D8)
+        private static StartupAction DecideStartup(bool hasLaunchArg, IUserSettings settings) =>
+            DecideStartup(hasLaunchArg, settings, () =>
+                new LaunchSessionGuard(new WtsLogonSessionKeyProvider(), new RegistryLaunchSessionStore(Registry.CurrentUser)).TryClaim());
+
+        internal const string AlreadyLaunchedMessage =
+            "--launch: startup programs were already launched in this logon session; exiting";
+
+        internal const string BlockedMessage = "--launch blocked: nothing launched";
+
+        // Seam for tests: the claim (real WTS and real HKCU in production) is passed in. Logs the outcome of a
+        // --launch start once, after the per-step errors. An unreadable setting fails closed like an unavailable
+        // session: blocked (nothing launched, the blocked balloon, exit), never a window popping up at login.
+        internal static StartupAction DecideStartup(bool hasLaunchArg, IUserSettings settings, Func<LaunchClaim> claim)
+        {
+            if (!hasLaunchArg) return StartupAction.Normal;
+
+            bool launchSettingOn;
+            try
+            {
+                launchSettingOn = settings.GetLaunchProgramsOnStartup();
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogError("--launch: could not read \"Launch programs on startup\"", ex);
+                LoggingService.LogError(BlockedMessage);
+                return StartupAction.BlockedAndExit;
+            }
+
+            var action = LaunchGate.Decide(hasLaunchArg, launchSettingOn, claim);
+            switch (action)
+            {
+                case StartupAction.Normal:
+                    LoggingService.LogInfo("--launch: \"Launch programs on startup\" is off; nothing is launched");
+                    break;
+                case StartupAction.LaunchAndExit:
+                    LoggingService.LogInfo("--launch: launching the startup programs");
+                    break;
+                case StartupAction.ExitAlreadyLaunched:
+                    LoggingService.LogInfo(AlreadyLaunchedMessage);
+                    break;
+                default:
+                    LoggingService.LogError(BlockedMessage);
+                    break;
+            }
+            return action;
         }
 
         // The app works without activation (a second launch then just exits), so a failure is logged, not fatal

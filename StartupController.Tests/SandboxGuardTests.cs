@@ -17,6 +17,7 @@ namespace StartupController.Tests
         {
             (@"new\s+" + Q + @"StartupRegistryService\s*\(\s*\)", "parameterless StartupRegistryService() targets real HKCU"),
             (@"new\s+" + Q + @"UserSettings\s*\(\s*Registry\s*\.\s*" + "CurrentUser", "UserSettings on real HKCU"),
+            (@"new\s+" + Q + @"RegistryLaunchSessionStore\s*\(\s*Registry\s*\.\s*" + "CurrentUser", "LaunchSession store on real HKCU (4.D8)"),
             (@"new\s+" + Q + @"Form1\s*\(\s*\)", "parameterless Form1() wires real HKCU and real process start"),
             (@"new\s+" + Q + @"ProcessStarter\s*\(", "real ProcessStarter would launch programs"),
             (@"Process\s*\.\s*" + "Start\\s*\\(", "tests must not start processes"),
@@ -61,6 +62,27 @@ namespace StartupController.Tests
                 "Program.cs", "Form1.cs", "StartupRegistryService.cs");
 
             Assert.True(offenders.Count == 0, "Registry.CurrentUser used outside the composition roots: " + string.Join(", ", offenders));
+        }
+
+        [Fact]
+        public void ProductionCode_CreatesTheRealLaunchSessionStoreOnlyInProgram()
+        {
+            // 4.D8 (test 20): only Program.Main records the logon session in real HKCU
+            var offenders = SourceScan.FilesMatching(
+                SourceScan.ProductionSourceDirectory(),
+                @"new\s+" + Q + @"RegistryLaunchSessionStore\s*\(\s*Registry\s*\.\s*" + "CurrentUser",
+                "Program.cs");
+
+            Assert.True(offenders.Count == 0, "RegistryLaunchSessionStore on real HKCU outside Program.cs: " + string.Join(", ", offenders));
+        }
+
+        [Fact]
+        public void ProgramCs_CreatesTheRealLaunchSessionStore()
+        {
+            // Keeps the rule above meaningful: the pattern must match the composition in Program.cs
+            var code = SourceScan.ReadCode(Path.Combine(SourceScan.ProductionSourceDirectory(), "Program.cs"));
+
+            Assert.Matches(@"new\s+" + Q + @"RegistryLaunchSessionStore\s*\(\s*Registry\s*\.\s*" + "CurrentUser", code);
         }
 
         [Fact]
