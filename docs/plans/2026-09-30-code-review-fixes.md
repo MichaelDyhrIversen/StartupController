@@ -51,7 +51,7 @@ The user answered the 4.D8 and Phase 5 open questions.
 - **Q5.2: Drop the launch condition if the installer extension can't target .NET 10.** In that case, remove the .NET launch condition from `SetupStartupController.vdproj` and rely on the apphost's ".NET required" dialog as a stopgap. Moving to WiX is not part of this release.
 - **Q5.3: Ship Phase 5 in the same release as Phases 1-4 and D8.**
 - **Q5.4: Keep the .NET Framework 4.7.2 prerequisite for now.** The user did not choose to remove it, so Phase 5 leaves it as is. It can be revisited in a later release.
-- **Q5.5: Still open.** The user did not choose to keep the minimum OS. Ask the user whether they want to raise `[assembly: SupportedOSPlatform("windows7.0")]` (and the installer's minimum OS, if any), and to what (for example `windows10.0.14393`, the .NET 10 minimum). Don't change it until they answer.
+- **Q5.5: Answered 2026-10-02: raise the minimum OS to Windows 10 1607.** Change `[assembly: SupportedOSPlatform("windows7.0")]` to `windows10.0.14393` (the .NET 10 minimum). Also raise the installer's minimum OS to match, if it sets one. Fix any new CA1416 warnings in the same commit.
 - **Q5.6: Yes, update `.claude/agents/*.md` from ".NET 8 / net8.0-windows" to ".NET 10 / net10.0-windows" as part of Phase 5.** User-approved, but only when Phase 5 lands (in the Phase 5 commit), not before.
 
 ## Status and handoff (2026-10-01, end of session)
@@ -77,7 +77,7 @@ Next steps, in order:
    - SECURITY.md: direct start without the MOTW/zone prompt (I-1); the self-guard residuals (wrappers and renamed copies *anywhere*; the mutex and D8 stop loops); the 30 s `--launch` timeout; D9.
    - The in-app help text in `Form1.cs` (the meaning of Enabled, the Changed status, the salmon Save button, the close prompt).
    - Check the README button names.
-5. **Phase 5 (D10):** .NET 10, after 4.D8, in the same release (Q5.3). Q5.1-Q5.4 and Q5.6 are answered. **Ask the user Q5.5 (minimum OS) before step 1 of 5.6.** Check installer support for .NET 10 early (it is the long pole; fallback per Q5.2), and finish before 2026-11-10. Update `.claude/agents/*.md` in the same phase (Q5.6).
+5. **Phase 5 (D10):** .NET 10, after 4.D8 (committed 46649f5, 2026-10-02), in the same release (Q5.3). All Phase 5 questions are answered. Q5.5: raise the minimum OS to `windows10.0.14393`. Check installer support for .NET 10 early (it is the long pole; fallback per Q5.2), and finish before 2026-11-10. Update `.claude/agents/*.md` in the same phase (Q5.6).
 6. **Manual UI checks by the user**, still outstanding: start to tray with no flash, tray restore, second start restoring the window, the Launch button disabled during a launch or UAC prompt, the settings checkboxes, the exit prompt Yes/No/Cancel, AutoSave, first-start migration, the Task Manager enable/disable round trip, and `--launch` on a throwaway profile only.
 
 ---

@@ -76,6 +76,7 @@ StartupController is a Windows application that allows users to view, manage, an
   - `EnabledPrograms`: the names StartupController launches.
   - `EnabledFingerprints`: `name|sha256hex` for each enabled name. Only a hash of the Run value (data and value type) is stored, never the command.
   - Legacy `StartupOrder` (REG_SZ, `;`-joined): read once to migrate when `ProgramOrder` is absent. It is never written or deleted afterwards.
+- `LaunchSession.{session id}` (REG_SZ, `v1:{id}:{logonTime}`): records that `--launch` already ran in that Windows logon session, so it runs at most once per session. An older single `LaunchSession` value may exist on development machines and is ignored.
 - Reads: HKCU `Software\Microsoft\Windows\CurrentVersion\Run` and `...\Explorer\StartupApproved\Run`. The app never writes `StartupApproved`. No admin rights are needed.
 
 ## Singleton Application Instance

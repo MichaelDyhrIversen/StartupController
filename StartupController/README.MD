@@ -28,6 +28,7 @@
 - **Run command format:** StartupController starts each program from its Run command. Put the full path in quotes, for example `"C:\Program Files\App\app.exe" --minimized`. Relative paths are not started. "Executable not found" means the command could not be resolved to an existing file, often because an unquoted path with spaces or arguments was used. Quote the path in the Run entry and try again.
 - **Reorder:** Use the arrow buttons (↑ and ↓ to move one step, ⇈ and ⇊ to move to the top or bottom) to change the order, then click "Save Order".
 - **Settings:** Use the checkboxes at the bottom: "Silence Notifications", "Launch Enabled Programs On System Startup", "Launch To Tray" and "Autosave on change".
+- **Once per logon:** the automatic launch at login (`--launch`) runs at most once per Windows logon session. Signing out and in, or rebooting, allows a new run. If Windows can't confirm the session, nothing is launched and a balloon says "Startup programs were not launched automatically. Open StartupController and use Launch." The Launch button always works.
 - **View Logs:** Click "View Logs" to see what was launched and any errors.
 - **Help:** Click "Help" for usage instructions.
 

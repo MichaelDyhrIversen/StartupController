@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Starting StartupController a second time restores the existing window from the tray instead of doing nothing.
 - `--launch` logs "Launched n of m" when it finishes.
+- New Help text and tooltips.
+- **`--launch` runs at most once per Windows logon session.** A later `--launch` in the same session logs one line and exits with nothing launched. Signing out and in, or rebooting, allows a new run. The Launch button is unaffected.
+  - The session is recorded per Windows session in the HKCU REG_SZ value `Software\StartupController\LaunchSession.{session id}`. It holds only the session id and logon time. Console and Remote Desktop sessions of the same user don't interfere. No admin rights are needed.
+  - Fail closed: if the session can't be identified or recorded, or "Launch programs on startup" can't be read, `--launch` launches nothing. It logs "--launch blocked: nothing launched", shows one balloon ("Startup programs were not launched automatically. Open StartupController and use Launch.") and exits after about 4 seconds. No window opens at login.
 
 ### Changed
 - **Run command parsing (behaviour change).** A Run value is split into program and arguments as follows:
@@ -31,7 +35,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - A reinstall with identical data keeps working.
   - On upgrade, enabled programs that are currently listed keep launching. Their fingerprints are recorded at the first save.
   - App updates that rewrite their Run entry need re-enabling.
+- **Logging (security).**
+  - Command-line arguments are never logged or shown in balloons. Unresolved commands show only their first path part. Error messages no longer include arguments.
+  - Log escaping covers line breaks, tabs, control characters, bidi and invisible formatting characters, and invalid Unicode. Names with invalid Unicode are now logged instead of silently skipped.
+  - Log rotation at 1 MB keeps 3 files, with about a minute of backoff if rotation fails.
+  - The log session header is written for every first instance, including early exits.
 - Settings are now cached for the life of the process.
+- The selection is kept after move, enable, disable and reload.
 - AutoSave no longer shows a balloon after each successful save. A failed autosave shows a balloon and turns the Save button salmon. Switching AutoSave on saves pending changes immediately.
 - Closing with unsaved changes: Cancel keeps the app open. Yes waits for the save, and if it fails the app stays open with an error. On Windows shutdown or logoff there is no prompt. Unsaved changes are discarded and logged.
 
@@ -43,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Saved programs whose Run entry disappears are kept hidden and return in place when listed again.
 - A malformed `ProgramOrder`, `EnabledPrograms` or `EnabledFingerprints` enables nothing and no longer falls back to the legacy value. Lists are capped at 1024 names of up to 260 characters.
 - Every successful launch is now logged.
+- The logs folder is recreated if it was deleted.
+- View Logs and Open Logs warn with the log path if the log can't be opened.
 - `--launch` reports a load failure instead of exiting silently.
 - No window flash when the app starts to the tray.
 - A settings checkbox reverts and shows a notification if saving fails.
