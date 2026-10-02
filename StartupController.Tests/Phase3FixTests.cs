@@ -231,8 +231,8 @@ namespace StartupController.Tests
                 if (!CreateHardLinkW(link, self, IntPtr.Zero))
                     return; // file system without hardlinks: nothing to check
 
-                Assert.True(ProgramLauncher.IsSameFile(link, self));
-                Assert.False(ProgramLauncher.IsSameFile(other, self));
+                Assert.True(PathHelper.IsSameFile(link, self));
+                Assert.False(PathHelper.IsSameFile(other, self));
 
                 var starter = FakeProcessStarter.AllExesExist();
                 var launcher = new ProgramLauncher(starter, self); // real normalizer and identity check
@@ -265,8 +265,8 @@ namespace StartupController.Tests
             Assert.Empty(starter.Started);
             Assert.Empty(starter.FileExistsCalls);
             var line = Assert.Single(TestLog.LinesContaining(name));
-            Assert.DoesNotContain("qqqq", line);
-            Assert.DoesNotContain(@"C:\Apps", line);
+            Assert.DoesNotContain("qqqq", line, StringComparison.Ordinal);
+            Assert.DoesNotContain(@"C:\Apps", line, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -411,7 +411,7 @@ namespace StartupController.Tests
             Assert.Equal(1, summary.Failed);
             Assert.Equal(1, summary.Launched);
             var line = Assert.Single(TestLog.LinesContaining(name), l => l.Contains("\tLAUNCH\t"));
-            Assert.Contains("did not return", line);
+            Assert.Contains("did not return", line, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -421,7 +421,7 @@ namespace StartupController.Tests
 
             new ThrowingNotifier().SafeNotify(name);
 
-            Assert.Contains("\tERROR\t", TestLog.Read());
+            Assert.Contains("\tERROR\t", TestLog.Read(), StringComparison.Ordinal);
         }
 
         private sealed class ThrowingNotifier : INotifier

@@ -68,7 +68,7 @@ namespace StartupController.Tests
         [Fact]
         public void DefaultEventName_IsSessionLocal()
         {
-            Assert.StartsWith(@"Local\", InstanceActivation.DefaultEventName);
+            Assert.StartsWith(@"Local\", InstanceActivation.DefaultEventName, StringComparison.Ordinal);
         }
     }
 }

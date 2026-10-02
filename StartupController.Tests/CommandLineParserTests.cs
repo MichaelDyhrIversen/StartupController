@@ -142,7 +142,7 @@ namespace StartupController.Tests
         public void EnvironmentVariables_AreExpanded() // was EnvironmentVariables_AreNotExpanded_Current
         {
             var expected = Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%") + @"\x.exe";
-            Assert.DoesNotContain("%", expected);
+            Assert.DoesNotContain("%", expected, StringComparison.Ordinal);
 
             var (exe, _) = CommandLineParser.Split(@"%LOCALAPPDATA%\x.exe", Nothing);
 

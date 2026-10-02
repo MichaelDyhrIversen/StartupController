@@ -27,7 +27,6 @@ namespace StartupController.Tests
             (@"\b(StartupRegistryService|Form1|ProcessStarter)\s+\w+\s*=\s*" + @"new\s*\(\s*\)", "target-typed new() of a type whose default constructor is real"),
             (@"new\s+" + @"(System\.Diagnostics\.)?Process\s*\(", "tests must not create Process objects"),
             (@"Activator\s*\.\s*" + "CreateInstance", "reflection could bypass the constructor checks"),
-            (@"OpenLog" + @"File\s*\(", "LoggingService.OpenLogFile shell-executes the log file"),
             (@"RegistryHive\s*\.\s*" + "CurrentUser", "RegistryHive.CurrentUser reaches real HKCU without the sandbox"),
             (@"using\s+static\s+Microsoft\.Win32\." + @"Registry\b", "using static Registry hides Registry.CurrentUser from these checks"),
             (@"typeof\s*\(\s*" + Q + @"ProcessStarter\b", "typeof(ProcessStarter) could be used to create the real starter"),
@@ -67,11 +66,11 @@ namespace StartupController.Tests
         [Fact]
         public void ProductionCode_StartsProcessesOnlyThroughTheSeam()
         {
-            // ProcessStarter is the launch seam; LoggingService.OpenLogFile opens the log in the default editor
+            // ProcessStarter is the only seam; LoggingService.OpenLogFile also goes through IProcessStarter (Phase 4, item 18)
             var offenders = SourceScan.FilesMatching(
                 SourceScan.ProductionSourceDirectory(),
                 @"Process\s*\.\s*" + "Start\\s*\\(",
-                "ProcessStarter.cs", "LoggingService.cs");
+                "ProcessStarter.cs");
 
             Assert.True(offenders.Count == 0, "Process.Start outside ProcessStarter: " + string.Join(", ", offenders));
         }
@@ -92,10 +91,10 @@ namespace StartupController.Tests
                 "/* Registry" + ".CurrentUser\n */ var b = \"// kept\";\n" +
                 "var c = @\"C:\\x \"\"q\"\" // kept too\"; var d = '\\'';");
 
-            Assert.DoesNotContain("Process" + ".Start", code);
-            Assert.DoesNotContain("Registry" + ".CurrentUser", code);
-            Assert.Contains("\"// kept\"", code);
-            Assert.Contains("// kept too", code);
+            Assert.DoesNotContain("Process" + ".Start", code, StringComparison.Ordinal);
+            Assert.DoesNotContain("Registry" + ".CurrentUser", code, StringComparison.Ordinal);
+            Assert.Contains("\"// kept\"", code, StringComparison.Ordinal);
+            Assert.Contains("// kept too", code, StringComparison.Ordinal);
             Assert.Equal(3, code.Count(ch => ch == '\n'));
         }
 

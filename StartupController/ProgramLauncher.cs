@@ -1,10 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Windows.Forms;
-using Microsoft.Win32.SafeHandles;
 
 namespace StartupController
 {
@@ -16,10 +11,10 @@ namespace StartupController
     // Outcome of a single launch attempt.
     // - NotFound: no executable could be determined, or it doesn't exist and may not be shell-started.
     // - Blocked: the entry starts StartupController itself and is never launched (3.1a).
-    public sealed record LaunchResult(bool Success, bool NotFound = false, string? Error = null, bool Blocked = false)
+    // - ExePath: the parsed executable as ProgramLauncher.LoggableExe shows it (never the arguments), when one was
+    //   determined. It is what gets logged.
+    public sealed record LaunchResult(bool Success, bool NotFound = false, string? Error = null, bool Blocked = false, string? ExePath = null)
     {
-        public static readonly LaunchResult Ok = new(true);
-
         public static readonly LaunchResult BlockedSelf = new(false, Error: "This entry starts StartupController itself", Blocked: true);
     }
 
@@ -37,6 +32,8 @@ namespace StartupController
     {
         internal const string SelfFileName = "StartupController.exe";
         internal const int MaxCommandLength = 32767; // CreateProcess limit
+        internal const int MaxErrorLength = 512;     // exception text kept in LaunchResult.Error
+        private const int MinRedactedLength = 4;      // shorter values ("-y", "/s") would mangle ordinary text
         private const int ERROR_ELEVATION_REQUIRED = 740;
 
         private readonly IProcessStarter _starter;
@@ -44,23 +41,21 @@ namespace StartupController
         private readonly Func<string, string> _normalizePath;
         private readonly Func<string, string, bool> _sameFile;
 
-        public ProgramLauncher(IProcessStarter starter)
-            : this(starter, Application.ExecutablePath)
-        {
-        }
-
         // selfExePath: this app's executable. normalizePath: full path with 8.3 short names expanded.
         // sameFile: true when two paths are the same file on disk (hardlinks, subst, UNC aliases). Tests fake both.
         public ProgramLauncher(IProcessStarter starter, string selfExePath, Func<string, string>? normalizePath = null, Func<string, string, bool>? sameFile = null)
         {
             _starter = starter ?? throw new ArgumentNullException(nameof(starter));
             _selfExePath = selfExePath ?? "";
-            _normalizePath = normalizePath ?? NormalizePath;
-            _sameFile = sameFile ?? IsSameFile;
+            _normalizePath = normalizePath ?? PathHelper.NormalizePath;
+            _sameFile = sameFile ?? PathHelper.IsSameFile;
         }
 
         public LaunchResult Launch(StartupProgram program)
         {
+            string? exePath = null;
+            string? shownExe = null;  // what may be logged or shown for exePath (see LoggableExe)
+            string arguments = "";
             try
             {
                 if (program.Path.Length > MaxCommandLength)
@@ -68,10 +63,13 @@ namespace StartupController
 
                 // REG_EXPAND_SZ paths were expanded when read; expand REG_SZ ones here, never twice
                 var parsed = CommandLineParser.Parse(program.Path, _starter.FileExists, expandEnvironment: !program.PathExpanded);
-                var exePath = parsed.ExePath;
+                exePath = parsed.ExePath;
+                arguments = parsed.Arguments;
 
                 if (string.IsNullOrEmpty(exePath))
                     return new LaunchResult(false, NotFound: true, Error: "Executable path could not be determined from entry.");
+
+                shownExe = LoggableExe(exePath);
 
                 if (exePath.Length + parsed.Arguments.Length > MaxCommandLength)
                     return Reject(program, "command is too long after expansion", "Command is too long");
@@ -87,12 +85,12 @@ namespace StartupController
                     return Reject(program, "invalid executable path (stream name, or trailing dot or space)", "Invalid executable path");
 
                 if (parsed.UnquotedWithSpaces)
-                    LoggingService.LogWarning($"'{program.Name}': unquoted path with spaces, resolved to '{exePath}'");
+                    LoggingService.LogWarning($"'{program.Name}': unquoted path with spaces, resolved to '{shownExe}'");
 
                 if (CommandLineParser.IsFullyQualified(exePath))
                 {
                     if (!_starter.FileExists(exePath))
-                        return new LaunchResult(false, NotFound: true, Error: $"Executable not found: {exePath}");
+                        return new LaunchResult(false, NotFound: true, Error: $"Executable not found: {shownExe}", ExePath: shownExe);
 
                     StartExisting(exePath, parsed.Arguments);
                 }
@@ -112,18 +110,67 @@ namespace StartupController
                 else
                 {
                     // Relative paths (sub\app.exe, ..\x, C:app.exe, \app.exe) would resolve against the current directory
-                    return new LaunchResult(false, NotFound: true, Error: $"Executable not found (not a full path): {exePath}");
+                    return new LaunchResult(false, NotFound: true, Error: $"Executable not found (not a full path): {shownExe}", ExePath: shownExe);
                 }
 
-                return LaunchResult.Ok;
+                return new LaunchResult(true, ExePath: shownExe);
             }
             catch (FileNotFoundException fnf)
             {
-                return new LaunchResult(false, NotFound: true, Error: fnf.Message);
+                return new LaunchResult(false, NotFound: true, Error: SafeErrorText(fnf.Message, program.Path, exePath, shownExe, arguments), ExePath: shownExe);
             }
             catch (Exception ex)
             {
-                return new LaunchResult(false, Error: ex.Message);
+                return new LaunchResult(false, Error: SafeErrorText(ex.Message, program.Path, exePath, shownExe, arguments), ExePath: shownExe);
+            }
+        }
+
+        // The executable as it may be logged or shown. The parser keeps a command whole when it finds no executable
+        // token ("C:\Tools\mytool --token=x", "C:\Tools\sync --key=x.cmd"), so a parsed exe with whitespace that
+        // doesn't exist may hold arguments: only its first token is kept, plus the length of the rest.
+        // An existing file is shown in full (its name is a real path, not arguments).
+        internal string LoggableExe(string exePath)
+        {
+            int whitespace = IndexOfWhitespace(exePath);
+            if (whitespace < 0) return exePath;
+            if (CommandLineParser.IsFullyQualified(exePath) && SafeExists(exePath)) return exePath;
+            return $"{exePath.Substring(0, whitespace)} <+{exePath.Length - whitespace} chars>";
+        }
+
+        // Defence in depth for exception text: .NET's start errors name the exe and working directory, not the
+        // arguments, but a message that echoes the command, the unshown part of the exe or the arguments is redacted.
+        // Also capped in length.
+        internal static string SafeErrorText(string message, string command, string? exePath, string? shownExe, string arguments)
+        {
+            var text = message ?? "";
+            text = Redact(text, command, "<command>");
+            if (exePath != null && shownExe != null && exePath != shownExe)
+                text = Redact(text, exePath, shownExe);
+            text = Redact(text, arguments, "<arguments>");
+            return text.Length > MaxErrorLength ? text.Substring(0, MaxErrorLength) + "..." : text;
+        }
+
+        private static string Redact(string text, string secret, string replacement) =>
+            secret.Trim().Length < MinRedactedLength ? text : text.Replace(secret, replacement, StringComparison.OrdinalIgnoreCase);
+
+        private static int IndexOfWhitespace(string text)
+        {
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (char.IsWhiteSpace(text[i])) return i;
+            }
+            return -1;
+        }
+
+        private bool SafeExists(string path)
+        {
+            try
+            {
+                return _starter.FileExists(path);
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
@@ -145,7 +192,8 @@ namespace StartupController
                 WorkingDirectory = Path.GetDirectoryName(exePath),
                 Arguments = arguments
             };
-            LoggingService.LogInfo($"Process start: Exe='{psi.FileName}' Args='{psi.Arguments}' WorkingDir='{psi.WorkingDirectory}' Shell={psi.UseShellExecute}");
+            // Arguments may hold secrets (tokens, passwords): log their length only
+            LoggingService.LogInfo($"Process start: Exe='{psi.FileName}' Args=<{psi.Arguments.Length} chars> WorkingDir='{psi.WorkingDirectory}' Shell={psi.UseShellExecute}");
 
             if (!direct)
             {
@@ -177,7 +225,7 @@ namespace StartupController
         // Only the executable is checked; arguments are not scanned.
         internal bool IsSelf(string exePath)
         {
-            var trimmed = StripDevicePrefix(exePath.Trim()).TrimEnd('.', ' ');
+            var trimmed = PathHelper.StripDevicePrefix(exePath.Trim()).TrimEnd('.', ' ');
             if (trimmed.Length == 0) return false;
 
             var name = SafeFileName(trimmed);
@@ -202,7 +250,7 @@ namespace StartupController
                 }
             }
 
-            var self = _selfExePath.Length == 0 ? "" : SafeNormalize(StripDevicePrefix(_selfExePath));
+            var self = _selfExePath.Length == 0 ? "" : SafeNormalize(PathHelper.StripDevicePrefix(_selfExePath));
             foreach (var candidate in candidates)
             {
                 var normalized = SafeNormalize(candidate);
@@ -219,20 +267,10 @@ namespace StartupController
         private static bool IsSelfName(string fileName) =>
             string.Equals(fileName.TrimEnd('.', ' '), SelfFileName, StringComparison.OrdinalIgnoreCase);
 
-        // "\\?\C:\x" -> "C:\x", "\\?\UNC\srv\share" -> "\\srv\share", "\\.\C:\x" -> "C:\x"
-        internal static string StripDevicePrefix(string path)
-        {
-            if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
-                return @"\\" + path.Substring(8);
-            if (path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.StartsWith(@"\\.\", StringComparison.Ordinal))
-                return path.Substring(4);
-            return path;
-        }
-
         // No alternate data stream (a ':' anywhere but after the drive letter) and no trailing dot or space
         internal static bool IsWellFormedExePath(string exePath)
         {
-            var path = StripDevicePrefix(exePath);
+            var path = PathHelper.StripDevicePrefix(exePath);
             int start = path.Length >= 2 && path[1] == ':' ? 2 : 0;
             if (path.IndexOf(':', start) >= 0) return false;
             return !CommandLineParser.EndsWithDotOrSpace(path);
@@ -286,58 +324,5 @@ namespace StartupController
                 return path;
             }
         }
-
-        // Full path with 8.3 short names expanded (GetLongPathNameW works only for paths that exist)
-        internal static string NormalizePath(string path)
-        {
-            var full = Path.GetFullPath(path);
-            var buffer = new StringBuilder(1024);
-            uint length = GetLongPathNameW(full, buffer, (uint)buffer.Capacity);
-            if (length > buffer.Capacity)
-            {
-                buffer = new StringBuilder((int)length);
-                length = GetLongPathNameW(full, buffer, (uint)buffer.Capacity);
-            }
-            return length > 0 && length <= buffer.Capacity ? buffer.ToString() : full;
-        }
-
-        // Same volume serial number and file index: the same file, whatever path reaches it
-        internal static bool IsSameFile(string a, string b)
-        {
-            if (!File.Exists(a) || !File.Exists(b)) return false;
-            if (!TryGetFileId(a, out var idA) || !TryGetFileId(b, out var idB)) return false;
-            return idA == idB;
-        }
-
-        private static bool TryGetFileId(string path, out (uint Volume, uint High, uint Low) id)
-        {
-            id = default;
-            using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (!GetFileInformationByHandle(handle, out var info)) return false;
-            id = (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow);
-            return true;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct BY_HANDLE_FILE_INFORMATION
-        {
-            public uint FileAttributes;
-            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-            public uint VolumeSerialNumber;
-            public uint FileSizeHigh;
-            public uint FileSizeLow;
-            public uint NumberOfLinks;
-            public uint FileIndexHigh;
-            public uint FileIndexLow;
-        }
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern uint GetLongPathNameW(string lpszShortPath, StringBuilder lpszLongPath, uint cchBuffer);
     }
 }

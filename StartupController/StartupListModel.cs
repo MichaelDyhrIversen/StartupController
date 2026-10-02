@@ -41,6 +41,27 @@ namespace StartupController
             return -1;
         }
 
+        // Where the selection goes after the view is rebuilt: the same instance, else the first program with exactly
+        // the same name (e.g. after a reload), else the first with the same name ignoring case, else -1
+        public int IndexToReselect(StartupProgram? selected)
+        {
+            if (selected == null) return -1;
+            int index = IndexOf(selected);
+            if (index >= 0) return index;
+            index = IndexOfName(selected.Name, StringComparison.Ordinal);
+            return index >= 0 ? index : IndexOfName(selected.Name, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private int IndexOfName(string name, StringComparison comparison)
+        {
+            for (int i = 0; i < _programs.Count; i++)
+            {
+                if (string.Equals(_programs[i].Name, name, comparison))
+                    return i;
+            }
+            return -1;
+        }
+
         public bool MoveUp(StartupProgram program) => Move(program, -1);
 
         public bool MoveDown(StartupProgram program) => Move(program, 1);

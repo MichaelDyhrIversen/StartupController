@@ -2,6 +2,9 @@ namespace StartupController.Tests.Infrastructure
 {
     internal static class Programs
     {
+        /// <summary>Self path for ProgramLauncher in tests that don't care about it: the test host, as the removed one-argument constructor used.</summary>
+        public static string TestHostExe => Environment.ProcessPath ?? "";
+
         public static StartupProgram P(string name, bool enabled = false, string? path = null) => new StartupProgram
         {
             Name = name,

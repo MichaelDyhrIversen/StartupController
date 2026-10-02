@@ -29,7 +29,7 @@ namespace StartupController.Tests
         {
             var code = SourceScan.ReadCode(Path.Combine(SourceScan.ProductionSourceDirectory(), "Program.cs"));
 
-            Assert.Contains("Directory.SetCurrentDirectory(Environment.SystemDirectory)", code);
+            Assert.Contains("Directory.SetCurrentDirectory(Environment.SystemDirectory)", code, StringComparison.Ordinal);
         }
 
         // ---------- L-B: a pre-created activation event is never used ----------
@@ -134,14 +134,14 @@ namespace StartupController.Tests
             var summary = await runner.LaunchSequenceAsync(new[] { P(name, path: @"C:\Secret\late.exe --token") });
             Assert.Equal(1, summary.Failed);
 
-            late.SetResult(LaunchResult.Ok);
+            late.SetResult(new LaunchResult(true));
 
             string? line = null;
             SpinWait.SpinUntil(() => (line = TestLog.LinesContaining(name).FirstOrDefault(l => l.Contains("after the launch timeout"))) != null, TimeSpan.FromSeconds(5));
             Assert.NotNull(line);
-            Assert.Contains("started", line);
-            Assert.DoesNotContain("Secret", line);
-            Assert.DoesNotContain("--token", line);
+            Assert.Contains("started", line, StringComparison.Ordinal);
+            Assert.DoesNotContain("Secret", line, StringComparison.Ordinal);
+            Assert.DoesNotContain("--token", line, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -158,7 +158,7 @@ namespace StartupController.Tests
             string? line = null;
             SpinWait.SpinUntil(() => (line = TestLog.LinesContaining(name).FirstOrDefault(l => l.Contains("after the launch timeout"))) != null, TimeSpan.FromSeconds(5));
             Assert.NotNull(line);
-            Assert.Contains("failed", line);
+            Assert.Contains("failed", line, StringComparison.Ordinal);
         }
     }
 }

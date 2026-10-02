@@ -47,7 +47,7 @@ namespace StartupController.Tests
             Assert.True(controller.ApplySilenceNotifications(false));   // reverted to "on": the previous value
             Assert.False(controller.ApplyAutoSaveOnChange(true));
             Assert.Equal(3, _notifier.Messages.Count);
-            Assert.All(_notifier.Messages, m => Assert.StartsWith("Failed to change", m));
+            Assert.All(_notifier.Messages, m => Assert.StartsWith("Failed to change", m, StringComparison.Ordinal));
             Assert.False(_sandbox.KeyExists(RegistrySandbox.AppPath));
         }
 
@@ -83,7 +83,7 @@ namespace StartupController.Tests
 
             Assert.Null(AppValue("LaunchProgramsOnStartup"));
             Assert.False(_sandbox.KeyExists(RegistrySandbox.RunPath));
-            Assert.Contains(RegistrySandbox.RunPath, Assert.Single(_notifier.Messages));
+            Assert.Contains(RegistrySandbox.RunPath, Assert.Single(_notifier.Messages), StringComparison.Ordinal);
         }
 
         [Fact]

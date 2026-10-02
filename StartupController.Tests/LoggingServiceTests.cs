@@ -12,7 +12,7 @@ namespace StartupController.Tests
             LoggingService.LogInfo(marker);
 
             Assert.StartsWith(TestLogSetup.LogDirectory, LoggingService.LogFilePath, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(marker, File.ReadAllText(LoggingService.LogFilePath));
+            Assert.Contains(marker, File.ReadAllText(LoggingService.LogFilePath), StringComparison.Ordinal);
         }
     }
 }

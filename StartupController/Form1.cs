@@ -1,17 +1,16 @@
-using System.Diagnostics;
-using System.Net.WebSockets;
-using System.IO;
-using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace StartupController
 {
     public partial class Form1 : Form, INotifier, IMessageDialog
     {
-        public bool LaunchFromStartup = false;
+        // Set by Program.Main when started with --launch (internal: not a designer-serialized property)
+        internal bool LaunchFromStartup { get; set; }
+
         private readonly IUserSettings _settings;
         private readonly IStartupRegistry _registry;
         private readonly IProgramLauncher _launcher;
+        private readonly IProcessStarter _starter; // opens the log file
         private readonly StartupListModel _model = new StartupListModel();
         private readonly OrderSaveCoordinator _saver;
         private readonly LaunchRunner _runner;
@@ -23,17 +22,29 @@ namespace StartupController
         private bool _manualLaunchInFlight;   // the Launch button ignores clicks until the current launch returns
         private int _restoreRequested;        // 1 = a second instance asked for the window (set from another thread)
 
-        // Used by the WinForms designer; the app goes through Program.cs with the same defaults
+        // Owner of the tray menu and tooltips, disposed with the form. Always created by InitializeComponent;
+        // ??= is a designer-time safety net.
+        private System.ComponentModel.IContainer Components => components ??= new System.ComponentModel.Container();
+
+        // Composition root: the real services (HKCU settings, registry, process starter). Program.Main and the
+        // WinForms designer both use it, so they can't drift apart. Tests use the public overload with fakes.
         public Form1()
-            : this(new UserSettings(Registry.CurrentUser), new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()))
+            : this(new UserSettings(Registry.CurrentUser), new StartupRegistryService(), new ProcessStarter())
         {
         }
 
-        public Form1(IUserSettings settings, IStartupRegistry registry, IProgramLauncher launcher)
+        // Concrete ProcessStarter: only the composition root calls this, to share one real starter (launcher, OpenLogs)
+        private Form1(IUserSettings settings, IStartupRegistry registry, ProcessStarter starter)
+            : this(settings, registry, new ProgramLauncher(starter, Application.ExecutablePath), starter)
+        {
+        }
+
+        public Form1(IUserSettings settings, IStartupRegistry registry, IProgramLauncher launcher, IProcessStarter starter)
         {
             _settings = settings;
             _registry = registry;
             _launcher = launcher;
+            _starter = starter;
             _saver = new OrderSaveCoordinator(_model, _registry, this);
             _runner = new LaunchRunner(_launcher, this, this);
             _settingsController = new SettingsController(_settings, _registry, this, Application.ExecutablePath);
@@ -70,17 +81,17 @@ namespace StartupController
                     AdjustListViewColumns();
             };
 
+            // Tray menu: Exit and Open Logs (the View Logs button opens the same file)
             var exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += (s, e) => Application.Exit();
-#pragma warning disable CS8602 // Dereference of a possibly null reference.
-            notifyIcon.ContextMenuStrip = new ContextMenuStrip();
-            notifyIcon.ContextMenuStrip.Items.Add(exitItem);
-            // Add menu item to open log file from tray menu and to the View Logs button
             var openLogsItem = new ToolStripMenuItem("Open Logs");
-            openLogsItem.Click += (s, e) => LoggingService.OpenLogFile();
-            notifyIcon.ContextMenuStrip.Items.Add(openLogsItem);
-            btnViewLogs.Click += (s, e) => LoggingService.OpenLogFile();
-#pragma warning restore CS8602 // Dereference of a possibly null reference.
+            openLogsItem.Click += (s, e) => OpenLogs();
+            var trayMenu = new ContextMenuStrip(Components);
+            trayMenu.Items.Add(exitItem);
+            trayMenu.Items.Add(openLogsItem);
+            notifyIcon.ContextMenuStrip = trayMenu;
+            btnViewLogs.Click += (s, e) => OpenLogs();
+            SetUpToolTips();
             chkLaunchToTray.Checked = _settings.GetStartToTray();
             // Settings checkboxes: a failed write is logged and notified, and the checkbox reverts
             chkLaunchToTray.CheckedChanged += (s, e) => ApplySetting(chkLaunchToTray, _settingsController.ApplyStartToTray);
@@ -333,7 +344,7 @@ namespace StartupController
 
         private async Task RunStartupAsync()
         {
-            LoggingService.StartSession(string.Join(' ', Environment.GetCommandLineArgs()));
+            LoggingService.StartSession(Environment.GetCommandLineArgs().Skip(1));
             LoggingService.LogInfo("Loading startup programs");
             bool loaded = await StartupSession.LoadProgramsAsync(_registry, _model, this);
             if (loaded)
@@ -354,20 +365,34 @@ namespace StartupController
             Application.Exit();
         }
 
+        // Rebuilds the rows from the model and keeps the selected program selected (see IndexToReselect)
         private void RefreshListView()
         {
-            listViewStartup.Items.Clear();
-            foreach (var prog in _model.Programs)
+            int reselect = _model.IndexToReselect(SelectedProgram());
+            listViewStartup.BeginUpdate();
+            try
             {
-                var item = new ListViewItem(new[]
+                listViewStartup.Items.Clear();
+                foreach (var prog in _model.Programs)
                 {
-            prog.Name,
-            StatusText(prog),
-            prog.Path,
-            prog.Description
-        });
-                item.Tag = prog;
-                listViewStartup.Items.Add(item);
+                    var item = new ListViewItem(new[] { prog.Name, StatusText(prog), prog.Path, prog.Description })
+                    {
+                        Tag = prog
+                    };
+                    listViewStartup.Items.Add(item);
+                }
+
+                if (reselect >= 0 && reselect < listViewStartup.Items.Count)
+                {
+                    var item = listViewStartup.Items[reselect];
+                    item.Selected = true;
+                    item.Focused = true;
+                    item.EnsureVisible();
+                }
+            }
+            finally
+            {
+                listViewStartup.EndUpdate();
             }
 
             AdjustListViewColumns();
@@ -376,68 +401,35 @@ namespace StartupController
         // Status column. Changed (D7): stored as enabled, but the Run data changed, so it isn't launched.
         internal static string StatusText(StartupProgram prog)
         {
-            if (prog.Changed) return "Changed – re-enable to launch";
+            if (prog.Changed) return "Changed \u2013 re-enable to launch"; // en dash, escaped so file encoding can't break it
             return prog.Enabled ? "Enabled" : "Disabled";
         }
-        /*
-        private void AdjustListViewColumns()
-        {
-            try
-            {
-                // Ensure there is space calculations based on client width
-                var avail = listViewStartup.ClientSize.Width;
-                // Reserve widths for Name, Status and Description columns (min values)
-                int nameMin = 140;
-                int statusWidth = 80; // small fixed for status
-                int descMin = 170;
-                int padding = 8; // some padding
 
-                int pathWidth = avail - (nameMin + statusWidth + descMin + padding);
-                if (pathWidth < 100) pathWidth = 100; // minimum for path
-
-                // Apply widths (column order: Name, Status, Path, Description)
-                if (listViewStartup.Columns.Count >= 4)
-                {
-                    listViewStartup.BeginUpdate();
-                    listViewStartup.Columns[0].Width = nameMin;
-                    listViewStartup.Columns[1].Width = statusWidth;
-                    listViewStartup.Columns[2].Width = pathWidth;
-                    listViewStartup.Columns[3].Width = descMin;
-                    listViewStartup.EndUpdate();
-                }
-            }
-            catch
-            {
-                // ignore layout failures
-            }
-        }*/
+        // Fixed widths of the Name, Status and Description columns; Path gets the rest
+        private const int NameColumnWidth = 140;
+        private const int StatusColumnWidth = 80;
+        private const int DescriptionColumnWidth = 170;
+        private const int ColumnPadding = 20;
+        private const int MinPathColumnWidth = 100;
+        private const int ColumnCount = 4; // Name, Status, Path, Description (see InitializeComponent)
 
         private void AdjustListViewColumns()
         {
-            // Reserve space for fixed columns
-            int nameWidth = 140;
-            int statusWidth = 80;
-            int descWidth = 170;
+            if (listViewStartup.Columns.Count < ColumnCount) return;
 
-            // Calculate the available width for the Path column
-            int pathWidth = listViewStartup.ClientSize.Width - nameWidth - statusWidth - descWidth - 20; // 20px for padding
+            int pathWidth = listViewStartup.ClientSize.Width - NameColumnWidth - StatusColumnWidth - DescriptionColumnWidth - ColumnPadding;
+            if (pathWidth < MinPathColumnWidth) pathWidth = MinPathColumnWidth;
 
-            // Ensure minimum width
-            if (pathWidth < 100) pathWidth = 100;
-
-            // Begin updating the ListView columns
             listViewStartup.BeginUpdate();
             try
             {
-                // Set the widths of the columns by index
-                listViewStartup.Columns[0].Width = nameWidth;
-                listViewStartup.Columns[1].Width = statusWidth;
+                listViewStartup.Columns[0].Width = NameColumnWidth;
+                listViewStartup.Columns[1].Width = StatusColumnWidth;
                 listViewStartup.Columns[2].Width = pathWidth;
-                listViewStartup.Columns[3].Width = descWidth;
+                listViewStartup.Columns[3].Width = DescriptionColumnWidth;
             }
             finally
             {
-                // Ensure the ListView ends the update
                 listViewStartup.EndUpdate();
             }
         }
@@ -447,19 +439,6 @@ namespace StartupController
         {
             if (listViewStartup.SelectedItems.Count == 0) return null;
             return listViewStartup.SelectedItems[0].Tag as StartupProgram;
-        }
-
-        // Select the row showing this program instance
-        private void SelectProgram(StartupProgram program)
-        {
-            foreach (ListViewItem item in listViewStartup.Items)
-            {
-                if (ReferenceEquals(item.Tag, program))
-                {
-                    item.Selected = true;
-                    return;
-                }
-            }
         }
 
         // Enable/Disable change only the app's own launch list (in memory until saved), never StartupApproved
@@ -544,7 +523,6 @@ namespace StartupController
                 bool moved = direction < 0 ? _model.MoveUp(prog) : _model.MoveDown(prog);
                 if (!moved) return;
                 RefreshListView();
-                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -560,7 +538,6 @@ namespace StartupController
             {
                 if (!_model.MoveTop(prog)) return; // already at top
                 RefreshListView();
-                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -577,7 +554,6 @@ namespace StartupController
             {
                 if (!_model.MoveBottom(prog)) return; // already at bottom
                 RefreshListView();
-                SelectProgram(prog);
                 SetDirty(true);
             }
             catch (Exception ex)
@@ -587,10 +563,64 @@ namespace StartupController
             }
         }
 
+        // Shown by the Help button. Keep in line with the Usage section of README.md. Non-ASCII characters are \u
+        // escapes so the file's encoding can't break them: \u2191 \u2193 \u21C8 \u21CA are the arrow buttons, \u2013 an en dash.
+        internal const string HelpText =
+            "Which programs are listed\n" +
+            "Programs in your Run key that are disabled in Windows (Task Manager > Startup apps). Programs Windows " +
+            "already starts are not listed, so nothing starts twice. To manage one here, disable it in Task Manager first. " +
+            "StartupController's own entry is never listed.\n\n" +
+            "Enabled and Disabled\n" +
+            "Enabled means StartupController launches the program when you log in, in the order of the list " +
+            "(with \"Launch Enabled Programs On System Startup\" checked). Use Enable, Disable or double-click a row. " +
+            "Windows' own startup settings are never changed.\n\n" +
+            "Order\n" +
+            "\u2191 and \u2193 move the selected program one step, \u21C8 and \u21CA move it to the top or bottom. " +
+            "Click Save Order to keep the order and the Enabled settings. With \"Autosave on change\" every change is saved right away.\n\n" +
+            "\"Changed \u2013 re-enable to launch\"\n" +
+            "The program's command changed since you enabled it (for example after an update). It is not launched " +
+            "until you enable it again and save. After the next save it shows as Disabled.\n\n" +
+            "Run command format\n" +
+            "Put the full path in quotes, for example \"C:\\Program Files\\App\\app.exe\" --minimized. Relative paths " +
+            "are not started. \"Executable not found\" means the command could not be resolved to an existing file, " +
+            "often because an unquoted path with spaces or arguments was used. Quote the path in the Run entry and try again.\n\n" +
+            "Settings\n" +
+            "The checkboxes at the bottom: \"Silence Notifications\", \"Launch Enabled Programs On System Startup\", \"Launch To Tray\" and \"Autosave on change\".\n\n" +
+            "Launch and View Logs\n" +
+            "Launch starts the selected program now. View Logs opens the log of what was launched and any errors.";
+
         private void ShowHelp()
         {
-            MessageBox.Show("This application allows you to manage disabled startup programs. Select a program to enable, disable, launch, or reorder it. Use Save Order to persist your preferred startup sequence.");
+            LoggingService.LogInfo("Help shown");
+            MessageBox.Show(this, HelpText, "StartupController Help", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+
+        private void SetUpToolTips()
+        {
+            var tips = new ToolTip(Components);
+            tips.SetToolTip(btnEnable, "Launch the selected program at login (Save Order to keep)");
+            tips.SetToolTip(btnDisable, "Don't launch the selected program at login (Save Order to keep)");
+            tips.SetToolTip(btnLaunch, "Start the selected program now");
+            tips.SetToolTip(btnMoveUp, "Move up one step");
+            tips.SetToolTip(btnMoveDown, "Move down one step");
+            tips.SetToolTip(btnMoveTop, "Move to the top");
+            tips.SetToolTip(btnMoveBottom, "Move to the bottom");
+            tips.SetToolTip(btnSaveOrder, "Save the order and the Enabled settings");
+            tips.SetToolTip(btnViewLogs, "Open the log of what was launched and any errors");
+            tips.SetToolTip(btnHelp, "How StartupController works");
+            tips.SetToolTip(chkLaunchProgramsOnStartup, "At login, launch the enabled programs in the order of the list");
+            tips.SetToolTip(chkLaunchToTray, "Start hidden in the tray, and hide to the tray when minimized");
+            tips.SetToolTip(chkSilenceNotifications, "Don't show balloon notifications");
+            tips.SetToolTip(chkAutoSaveOnChange, "Save every change right away");
+        }
+
+        // View Logs button and the tray's Open Logs item. A failure is logged by LoggingService and shown here.
+        private void OpenLogs()
+        {
+            if (LoggingService.OpenLogFile(_starter, out var error)) return;
+            ((IMessageDialog)this).ShowWarning($"Could not open the log file: {error}\n\nThe log is at:\n{LoggingService.LogFilePath}", "Startup Controller");
+        }
+
         void INotifier.Notify(string message) => ShowNotification(message);
 
         void IMessageDialog.ShowWarning(string text, string caption)

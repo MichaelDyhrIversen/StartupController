@@ -102,7 +102,7 @@ namespace StartupController.Tests
 
             var service = new StartupRegistryService(_sandbox.Root);
             var starter = FakeProcessStarter.AllExesExist();
-            var launcher = new ProgramLauncher(starter);
+            var launcher = new ProgramLauncher(starter, TestHostExe);
             for (int cycle = 0; cycle < 3; cycle++)
             {
                 var model = new StartupListModel();

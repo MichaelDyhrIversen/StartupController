@@ -9,7 +9,7 @@ namespace StartupController.Tests
     public class LaunchRunnerTests
     {
         private static LaunchRunner Runner(IProcessStarter starter, INotifier notifier, FakeDialog? dialog = null) =>
-            new LaunchRunner(new ProgramLauncher(starter), notifier, dialog ?? new FakeDialog(), launch => Task.FromResult(launch()));
+            new LaunchRunner(new ProgramLauncher(starter, TestHostExe), notifier, dialog ?? new FakeDialog(), launch => Task.FromResult(launch()));
 
         private static List<string> LaunchLines(string name) =>
             TestLog.LinesContaining(name).Where(l => l.Contains("\tLAUNCH\t")).ToList();
@@ -23,7 +23,7 @@ namespace StartupController.Tests
             var result = await Runner(new FakeProcessStarter(@"C:\Apps\ok.exe"), notifier).LaunchManualAsync(P(name, path: @"C:\Apps\ok.exe"));
 
             Assert.True(result.Success);
-            Assert.Contains("SUCCESS", Assert.Single(LaunchLines(name)));
+            Assert.Contains("SUCCESS", Assert.Single(LaunchLines(name)), StringComparison.Ordinal);
             Assert.Equal("Launched: " + name, Assert.Single(notifier.Messages));
         }
 
@@ -35,7 +35,7 @@ namespace StartupController.Tests
             var result = await Runner(new FakeProcessStarter(@"C:\Apps\x.exe"), new ThrowingNotifier()).LaunchManualAsync(P(name, path: @"C:\Apps\x.exe"));
 
             Assert.True(result.Success);
-            Assert.Contains("SUCCESS", Assert.Single(LaunchLines(name)));
+            Assert.Contains("SUCCESS", Assert.Single(LaunchLines(name)), StringComparison.Ordinal);
         }
 
         [Fact]
@@ -48,7 +48,7 @@ namespace StartupController.Tests
             var summary = await runner.LaunchSequenceAsync(new[] { P("Gone2", path: @"C:\Missing\gone2.exe") });
 
             Assert.Equal(2, notifier.Messages.Count);
-            Assert.All(notifier.Messages, m => Assert.Contains("not found", m));
+            Assert.All(notifier.Messages, m => Assert.Contains("not found", m, StringComparison.Ordinal));
             Assert.Equal(1, summary.Failed);
             Assert.Equal("Launched 0 of 1", summary.Text);
         }
@@ -64,9 +64,9 @@ namespace StartupController.Tests
 
             Assert.False(result.Success);
             var line = Assert.Single(LaunchLines(name));
-            Assert.Contains("FAILURE", line);
-            Assert.Contains("boom", line);
-            Assert.Contains("boom", Assert.Single(notifier.Messages));
+            Assert.Contains("FAILURE", line, StringComparison.Ordinal);
+            Assert.Contains("boom", line, StringComparison.Ordinal);
+            Assert.Contains("boom", Assert.Single(notifier.Messages), StringComparison.Ordinal);
         }
 
         [Fact]
@@ -78,7 +78,7 @@ namespace StartupController.Tests
             var summary = await runner.LaunchSequenceAsync(new[] { P(name), P(name + "b") });
 
             Assert.Equal(2, summary.Failed);
-            Assert.Contains("FAILURE", LaunchLines(name).First());
+            Assert.Contains("FAILURE", LaunchLines(name).First(), StringComparison.Ordinal);
         }
 
         [Theory]
@@ -107,7 +107,7 @@ namespace StartupController.Tests
             Assert.Equal(new[] { @"C:\Apps\A.exe", @"C:\Apps\C.exe" }, starter.Started.Select(s => s.FileName));
             Assert.Equal(new LaunchSummary(2, 3, 0, 1), summary);
             Assert.Equal("Launched 2 of 3", summary.Text);
-            Assert.Equal(new[] { "Starting A (1 of 3)", "Starting C (3 of 3)" }, notifier.Messages.Where(m => m.StartsWith("Starting")));
+            Assert.Equal(new[] { "Starting A (1 of 3)", "Starting C (3 of 3)" }, notifier.Messages.Where(m => m.StartsWith("Starting", StringComparison.Ordinal)));
         }
 
         [Fact]

@@ -1,9 +1,3 @@
-using System;
-using System.Threading;
-using System.Windows.Forms;
-using System.Threading.Tasks;
-using Microsoft.Win32;
-
 namespace StartupController
 {
     internal static class Program
@@ -12,7 +6,7 @@ namespace StartupController
         private const string MutexName = "StartupControllerSingletonMutex";
 
         [STAThread]
-        static async Task Main(string[] args)
+        static void Main(string[] args)
         {
             // Nothing may resolve against the directory the app was started from (e.g. Downloads with a planted
             // helper.exe): the shell searches the current directory before PATH for bare names
@@ -49,13 +43,12 @@ namespace StartupController
                     var activation = CreateActivation(relay);
                     try
                     {
-                        var settings = new UserSettings(Registry.CurrentUser);
-                        var form = new Form1(settings, new StartupRegistryService(), new ProgramLauncher(new ProcessStarter()));
-                        // Startup visibility (tray, --launch) is decided in Form1.SetVisibleCore
-                        if (args.Contains("--launch"))
+                        // The parameterless constructor is the one place the real services are composed.
+                        // Startup visibility (tray, --launch) is decided in Form1.SetVisibleCore.
+                        var form = new Form1
                         {
-                            form.LaunchFromStartup = true;
-                        }
+                            LaunchFromStartup = args.Contains("--launch")
+                        };
 
                         relay.Attach(form.RequestRestore);
                         Application.Run(form);
@@ -75,7 +68,6 @@ namespace StartupController
                     LoggingService.LogWarning("Second instance could not signal the running instance");
                 }
             }
-
         }
 
         // The app works without activation (a second launch then just exits), so a failure is logged, not fatal
@@ -96,11 +88,6 @@ namespace StartupController
                 LoggingService.LogError("Single-instance activation is unavailable", ex);
                 return null;
             }
-        }
-
-        private static void Form_Load(object? sender, EventArgs e)
-        {
-            throw new NotImplementedException();
         }
     }
 }

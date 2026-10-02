@@ -69,7 +69,7 @@ namespace StartupController.Tests
             Assert.False(ok);
             Assert.True(_model.IsDirty);
             var message = Assert.Single(_notifier.Messages);
-            Assert.Contains("denied", message);
+            Assert.Contains("denied", message, StringComparison.Ordinal);
             Assert.False(saver.HasPendingSaves);
         }
 

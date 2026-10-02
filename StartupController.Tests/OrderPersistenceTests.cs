@@ -43,7 +43,7 @@ namespace StartupController.Tests
         private List<string> LaunchEnabled(StartupListModel model)
         {
             var starter = FakeProcessStarter.AllExesExist(); // 3.1: a missing path with a directory is not started
-            var launcher = new ProgramLauncher(starter);
+            var launcher = new ProgramLauncher(starter, TestHostExe);
             foreach (var program in model.EnabledPrograms())
                 launcher.Launch(program);
             return starter.Started.Select(s => s.FileName).ToList();

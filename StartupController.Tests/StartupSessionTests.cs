@@ -33,8 +33,8 @@ namespace StartupController.Tests
 
             Assert.False(loaded);
             Assert.Equal(0, model.Count);
-            Assert.StartsWith("Failed to load startup programs", Assert.Single(notifier.Messages));
-            Assert.Contains("\tERROR\t", TestLog.Read());
+            Assert.StartsWith("Failed to load startup programs", Assert.Single(notifier.Messages), StringComparison.Ordinal);
+            Assert.Contains("\tERROR\t", TestLog.Read(), StringComparison.Ordinal);
         }
 
         [Fact]

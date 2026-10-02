@@ -67,19 +67,33 @@ namespace StartupController
                     return new Parsed("", "", false);
             }
 
-            // Shortest first: stop at the first prefix that ends in an executable extension
-            int end = 0;
-            while (end < command.Length)
+            // Shortest first: stop at the first prefix that ends in an executable extension. A candidate is the
+            // command up to a space (or the end) with trailing whitespace trimmed; its extension is checked after
+            // also trimming dots and spaces, as HasExecutableExtension does. One pass, no allocation per candidate.
+            int trimmedLength = 0;     // length of command[..i].TrimEnd()
+            int dotTrimmedLength = 0;  // length of command[..trimmedLength].TrimEnd('.', ' ')
+            int noDotSpaceLength = 0;  // length of command[..i].TrimEnd('.', ' ')
+            for (int i = 0; i <= command.Length; i++)
             {
-                int space = command.IndexOf(' ', end);
-                end = space < 0 ? command.Length : space;
-                var candidate = command.Substring(0, end).TrimEnd();
-                if (candidate.Length > 0 && HasExecutableExtension(candidate))
+                if (i == command.Length || command[i] == ' ')
                 {
-                    var args = command.Substring(end).Trim();
-                    return new Parsed(candidate, args, candidate.Contains(' '));
+                    if (trimmedLength > 0 && EndsWithExecutableExtension(command.AsSpan(0, dotTrimmedLength)))
+                    {
+                        var candidate = command.Substring(0, trimmedLength);
+                        var args = command.Substring(i).Trim();
+                        return new Parsed(candidate, args, candidate.Contains(' '));
+                    }
+                    if (i == command.Length) break;
                 }
-                end++;
+
+                char c = command[i];
+                if (c != '.' && c != ' ')
+                    noDotSpaceLength = i + 1;
+                if (!char.IsWhiteSpace(c))
+                {
+                    trimmedLength = i + 1;
+                    dotTrimmedLength = noDotSpaceLength;
+                }
             }
 
             // No executable token: only the whole string may get ".exe" (as CreateProcess would add it)
@@ -129,6 +143,18 @@ namespace StartupController
                 return false;
             }
             return ExecutableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Same answer as Path.GetExtension(path) being an executable extension, for a path already trimmed of
+        // trailing dots and spaces: every executable extension is a dot plus letters, so it is the path's ending
+        private static bool EndsWithExecutableExtension(ReadOnlySpan<char> path)
+        {
+            foreach (var extension in ExecutableExtensions)
+            {
+                if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         internal static bool EndsWithDotOrSpace(string path) => path.EndsWith('.') || path.EndsWith(' ');

@@ -32,9 +32,9 @@ namespace StartupController.Tests
             Assert.Empty(starter.Started);
             var lines = TestLog.LinesContaining(name);
             var warning = Assert.Single(lines);
-            Assert.Contains("\tWARN\t", warning);
-            Assert.DoesNotContain(@"Program Files", warning);
-            Assert.DoesNotContain("--launch", warning);
+            Assert.Contains("\tWARN\t", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain(@"Program Files", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain("--launch", warning, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -203,7 +203,7 @@ namespace StartupController.Tests
             // GetLongPathNameW fails for paths that don't exist; the full path is used instead
             var path = @"C:\" + Guid.NewGuid().ToString("N") + @"\x\..\app.exe";
 
-            Assert.Equal(Path.GetFullPath(path), ProgramLauncher.NormalizePath(path));
+            Assert.Equal(Path.GetFullPath(path), PathHelper.NormalizePath(path));
         }
     }
 }

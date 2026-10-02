@@ -91,8 +91,8 @@ namespace StartupController
                 ? $"Executable not found for {program.Name}: {result.Error}"
                 : $"Failed to launch {program.Name}: {result.Error}";
 
-        // Launch (with an optional timeout) plus the per-entry log line. Blocked is already logged by the launcher
-        // (name only); it gets no LAUNCH line because that line contains the command.
+        // Launch (with an optional timeout) plus the per-entry log line: name and parsed exe, never the arguments.
+        // Blocked is already logged by the launcher (name only) and gets no LAUNCH line. A timeout has no exe.
         private async Task<LaunchResult> RunAsync(StartupProgram program, TimeSpan? timeout)
         {
             LaunchResult result;
@@ -125,7 +125,7 @@ namespace StartupController
             }
 
             if (!result.Blocked)
-                LoggingService.LogLaunchResult(program.Name, program.Path, result.Success, result.Error ?? "");
+                LoggingService.LogLaunchResult(program.Name, result.ExePath, result.Success, result.Error ?? "");
             return result;
         }
 

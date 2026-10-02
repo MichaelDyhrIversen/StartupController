@@ -53,7 +53,7 @@ namespace StartupController.Tests
         private static List<string> Launched(StartupListModel model)
         {
             var starter = FakeProcessStarter.AllExesExist(); // 3.1: a missing path with a directory is not started
-            var launcher = new ProgramLauncher(starter);
+            var launcher = new ProgramLauncher(starter, TestHostExe);
             foreach (var program in model.EnabledPrograms())
                 launcher.Launch(program);
             return starter.Started.Select(s => s.FileName).ToList();
@@ -68,12 +68,7 @@ namespace StartupController.Tests
             _service.SaveStartupOrder(model.Snapshot());
         }
 
-        private static string ReadLog()
-        {
-            using var stream = new FileStream(LoggingService.LogFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
-        }
+        private static string ReadLog() => TestLog.Read();
 
         private static string Unique(string prefix) => prefix + Guid.NewGuid().ToString("N").Substring(0, 8);
 
@@ -174,8 +169,8 @@ namespace StartupController.Tests
             Assert.Equal($"{name}(changed)", Describe(model.Programs));
             Assert.Empty(Launched(model));
             var warning = Assert.Single(ReadLog().Split('\n'), l => l.Contains("WARN") && l.Contains(name));
-            Assert.DoesNotContain("Secret", warning);
-            Assert.DoesNotContain("-arg", warning);
+            Assert.DoesNotContain("Secret", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain("-arg", warning, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -382,8 +377,8 @@ namespace StartupController.Tests
             foreach (var value in _sandbox.ReadAllValues(RegistrySandbox.AppPath))
             {
                 var text = value.Data is string[] lines ? string.Join("\n", lines) : value.Data?.ToString() ?? "";
-                Assert.DoesNotContain("VerySecretPath", text);
-                Assert.DoesNotContain("token", text);
+                Assert.DoesNotContain("VerySecretPath", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("token", text, StringComparison.Ordinal);
             }
         }
 

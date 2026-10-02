@@ -223,7 +223,7 @@ namespace StartupController.Tests
         public void Launcher_OneFailureDoesNotPreventLaterLaunches()
         {
             var starter = new FakeProcessStarter(@"C:\Apps\a.exe", @"C:\Apps\b.exe");
-            var launcher = new ProgramLauncher(starter);
+            var launcher = new ProgramLauncher(starter, TestHostExe);
 
             starter.ThrowOnStart = new InvalidOperationException("first fails");
             var first = launcher.Launch(P("A", path: @"C:\Apps\a.exe"));
@@ -240,7 +240,7 @@ namespace StartupController.Tests
         {
             var starter = new FakeProcessStarter("tool.exe");
 
-            new ProgramLauncher(starter).Launch(P("T", path: "tool.exe /q"));
+            new ProgramLauncher(starter, TestHostExe).Launch(P("T", path: "tool.exe /q"));
 
             var psi = Assert.Single(starter.Started);
             Assert.Equal("tool.exe", psi.FileName);
@@ -253,7 +253,7 @@ namespace StartupController.Tests
         {
             var starter = new FakeProcessStarter();
 
-            var result = new ProgramLauncher(starter).Launch(P("X", path: "\"C:\\No Such\\x.exe\" -y"));
+            var result = new ProgramLauncher(starter, TestHostExe).Launch(P("X", path: "\"C:\\No Such\\x.exe\" -y"));
 
             Assert.False(result.Success);
             Assert.True(result.NotFound);
@@ -266,7 +266,7 @@ namespace StartupController.Tests
             var expanded = Environment.ExpandEnvironmentVariables(@"%LOCALAPPDATA%\x.exe");
             var starter = new FakeProcessStarter(expanded);
 
-            new ProgramLauncher(starter).Launch(P("X", path: @"%LOCALAPPDATA%\x.exe"));
+            new ProgramLauncher(starter, TestHostExe).Launch(P("X", path: @"%LOCALAPPDATA%\x.exe"));
 
             Assert.Equal(expanded, Assert.Single(starter.Started).FileName);
             Assert.DoesNotContain(starter.FileExistsCalls, c => c.Contains('%'));
@@ -280,7 +280,7 @@ namespace StartupController.Tests
             var program = P("X", path: @"C:\Apps\%LOCALAPPDATA%\x.exe");
             program.PathExpanded = true;
 
-            var result = new ProgramLauncher(starter).Launch(program);
+            var result = new ProgramLauncher(starter, TestHostExe).Launch(program);
 
             Assert.True(result.Success);
             Assert.Equal(@"C:\Apps\%LOCALAPPDATA%\x.exe", Assert.Single(starter.Started).FileName);
