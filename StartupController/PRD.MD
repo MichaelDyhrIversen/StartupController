@@ -46,11 +46,13 @@ StartupController is a Windows application that allows users to view, manage, an
   - What startup programs are.
   - How enabling/disabling works.
   - How to use the application features.
+- The help is a window with a list of sections, search and an About section (version and log folder), opened with the Help button, F1 or the tray menu. It is plain text compiled into the application. *(Added 2026-10-03, decided by the user: "a real help with sections".)*
 
 ## Non-Functional Requirements
 - Responsive and intuitive UI.
 - Changes should not require a system restart.
 - All actions should be logged for troubleshooting.
+- The log can be read inside the application (View Logs): read-only, with file choice, level filter, search, copy, and open in editor or folder. *(Added 2026-10-03, decided by the user: "open the log file within the app itself".)*
 - Application should not require administrative privileges unless necessary.
 
 ## Out of Scope

@@ -249,13 +249,15 @@ namespace StartupController.Tests
         [Fact]
         public void HelpText_HasTheExactArrowAndDashCharacters()
         {
+            var help = string.Join("\n", HelpContent.LoadEmbedded().Select(s => s.Title + "\n" + s.Body));
+
             foreach (var code in new[] { 0x2191, 0x2193, 0x21C8, 0x21CA })
-                Assert.Contains(((char)code).ToString(), Form1.HelpText, StringComparison.Ordinal);
+                Assert.Contains(((char)code).ToString(), help, StringComparison.Ordinal);
 
             var changed = new StartupProgram { Name = "X", Path = "x", Enabled = false, Description = "", Changed = true };
             Assert.Equal("Changed " + (char)0x2013 + " re-enable to launch", Form1.StatusText(changed));
-            Assert.Contains("own entry is never listed", Form1.HelpText, StringComparison.Ordinal);
-            Assert.Contains("Launch To Tray", Form1.HelpText, StringComparison.Ordinal);
+            Assert.Contains("own entry is never listed", help, StringComparison.Ordinal);
+            Assert.Contains("Launch To Tray", help, StringComparison.Ordinal);
         }
 
         // ---------- Test hygiene: string assertions are ordinal ----------

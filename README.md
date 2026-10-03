@@ -11,6 +11,7 @@
 - Option to silence notifications
 - Option to launch enabled programs automatically on system startup
 - Option to start the application minimized to the system tray
+- Built-in Help window and log viewer
 
 ## Installation
 
@@ -38,8 +39,15 @@ Requirements: Windows 10 version 1607 or later (or Windows 11) and the [.NET 10 
 - **Reorder:** Use the arrow buttons (↑ and ↓ to move one step, ⇈ and ⇊ to move to the top or bottom) to change the order, then click "Save Order".
 - **Settings:** Use the checkboxes at the bottom: "Silence Notifications", "Launch Enabled Programs On System Startup", "Launch To Tray" and "Autosave on change".
 - **Once per logon:** the automatic launch at login (`--launch`) runs at most once per Windows logon session. Signing out and in, or rebooting, allows a new run. If Windows can't confirm the session, nothing is launched and a balloon says "Startup programs were not launched automatically. Open StartupController and use Launch." The Launch button always works.
-- **View Logs:** Click "View Logs" to see what was launched and any errors.
-- **Help:** Click "Help" for usage instructions.
+- **View Logs:** Click "View Logs" (or use the tray menu) to open the log viewer inside the app. It shows what was launched and any errors, newest at the bottom, in the columns Time, Level, Category and Message. Errors and failed launches are red, warnings orange.
+  - **Files:** choose the current log, the previous one (`.1`) or the older one (`.2`). Only files that exist are listed. If no log has been written yet, the viewer says so.
+  - **Show:** "All levels", "Errors and warnings" (includes failed launches) or "Launches". You can also search and tick "Current session only".
+  - **Refresh:** press F5 or click "Refresh" to read new lines. "Auto-refresh" (off by default) checks the file every 2 seconds. If a refresh fails, auto-refresh turns itself off and the status bar says why.
+  - **Copy:** "Copy" or Ctrl+C copies the selected lines, Ctrl+A selects all and "Copy all shown" copies everything that is listed. Lines are tab-separated. Control and direction-changing characters in hand-edited log lines are copied as escape sequences. Use this to attach log lines to a bug report.
+  - **Open in editor** opens the current log in the program you use for `.log` files. **Open log folder** opens `%LOCALAPPDATA%\StartupController\logs` in Explorer.
+  - **Limits:** the viewer shows at most the last 50,000 lines and the last 4 MB of a file, and the status bar says which limit applied. It only reads the log and never changes it. Window size and position are not remembered.
+- **Help:** Click "Help" or press F1 to open the Help window. It has a list of sections on the left, a search box, and an About section with the version and the log folder. You can resize it and close it with "Close" or Esc. Only one Help window is open at a time: opening it again brings it to the front.
+- **Tray menu:** right-click the tray icon for "View Logs", "Help" and "Exit". Double-click the icon to show the window. Neither the Help window nor the log viewer opens during the automatic launch at login.
 
 ## Uninstalling
 

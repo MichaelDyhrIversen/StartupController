@@ -27,5 +27,8 @@ If applicable, add screenshots to help explain your problem.
  - OS: [e.g. Windows 11 24H2]
  - Version [e.g. 1.0.2]
 
+**Logs (optional)**
+In StartupController click "View Logs". Select the relevant lines and click "Copy" (or "Copy all shown"), then paste them here. Or click "Open log folder" and attach `startupcontroller.log`. Command-line arguments are never written to the log, but check the lines for anything private first.
+
 **Additional context**
 Add any other context about the problem here.

@@ -525,10 +525,12 @@ namespace StartupController.Tests
         {
             var changed = new StartupProgram { Name = "X", Path = "x", Enabled = false, Description = "", Changed = true };
 
-            Assert.Contains(Form1.StatusText(changed), Form1.HelpText, StringComparison.Ordinal);
+            var help = string.Join("\n", HelpContent.LoadEmbedded().Select(s => s.Title + "\n" + s.Body));
+
+            Assert.Contains(Form1.StatusText(changed), help, StringComparison.Ordinal);
             foreach (var topic in new[] { "Task Manager", "Enabled means", "↑", "↓", "⇈", "⇊", "Save Order", "Autosave on change",
                                           "Executable not found", "in quotes", "View Logs" })
-                Assert.Contains(topic, Form1.HelpText, StringComparison.Ordinal);
+                Assert.Contains(topic, help, StringComparison.Ordinal);
         }
 
         private sealed class TempDir : IDisposable

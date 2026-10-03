@@ -61,7 +61,15 @@ If the project acknowledges your report but does not provide any further respons
   - Logged values are escaped: line breaks, tabs, control characters, bidi and invisible formatting characters, and invalid Unicode, so one log call stays on one line.
   - Logs are in `%LOCALAPPDATA%\StartupController\logs` with the user's ACLs. They rotate at 1 MB and keep 3 files.
   - The log is not tamper-evident against processes running as the same user.
-  - View Logs opens the file with the user's `.log` file association. This is acceptable because the app runs asInvoker (no elevation).
+  - "Open in editor" (in the log viewer) opens only the current log with the user's `.log` file association. This is pre-existing behaviour and acceptable because the app runs asInvoker (no elevation).
+  - The folder `%LOCALAPPDATA%\StartupController\logs` is protected only by the per-user `%LOCALAPPDATA%` permissions. Log content is treated as untrusted when displayed.
+- Log viewer and Help window:
+  - The log viewer is read-only. It opens the file with sharing for reading and writing, holds no handle between refreshes (so logging and rotation are never blocked), never creates the log or its folder, and reads at most the last 4 MiB and 50,000 lines.
+  - Log content is shown as escaped plain text in a list. It is never opened, run or turned into links, and no log line has an action that opens a path.
+  - Copy puts the line on the clipboard with control and bidi characters escaped per field. App-written lines are unchanged.
+  - Help is compiled-in plain text. There is no RTF and no URL detection.
+  - "Open log folder" opens only `%LOCALAPPDATA%\StartupController\logs` by shell execute, after a `Directory.Exists` check. Accepted: a process running as the same user could swap the folder in between (a race), but that crosses no privilege boundary. Hardening (start `explorer.exe` with `UseShellExecute = false`) is deferred.
+  - Neither window opens in `--launch` mode.
 - Logging of the takeover and the uninstall helper: names only, never commands, paths or byte values.
 - Tests use a throwaway sandbox under `HKCU\Software\StartupController.Tests` and a fake process starter. Leftover sandbox keys are harmless.
 - `InternalsVisibleTo` for the test assembly is a test convenience, not a security boundary. The test assembly is not shipped in the installer.

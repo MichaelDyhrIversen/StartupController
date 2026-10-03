@@ -50,6 +50,11 @@ namespace StartupController
             get { lock (_lock) { return _logFile; } }
         }
 
+        internal static string LogDirectory
+        {
+            get { lock (_lock) { return _logDir; } }
+        }
+
         // Create the log directory and write the header once, on first use.
         private static void EnsureInitialized()
         {
@@ -205,7 +210,15 @@ namespace StartupController
         {
             ArgumentNullException.ThrowIfNull(starter);
             EnsureInitialized();
-            var logFile = LogFilePath;
+            return OpenLogFile(starter, LogFilePath, out error);
+        }
+
+        // The file comes from the caller's composition (the log viewer gets LogFilePath), never from log content
+        internal static bool OpenLogFile(IProcessStarter starter, string logFile, out string? error)
+        {
+            ArgumentNullException.ThrowIfNull(starter);
+            ArgumentException.ThrowIfNullOrEmpty(logFile);
+            EnsureInitialized();
             try
             {
                 lock (_lock)
@@ -221,6 +234,37 @@ namespace StartupController
             {
                 Debug.WriteLine("Could not open the log file: " + ex);
                 LogError("Could not open the log file", ex);
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        // Opens the log folder in Explorer through the process seam (log viewer). Returns false (logged) when it can't.
+        public static bool OpenLogFolder(IProcessStarter starter, out string? error) => OpenLogFolder(starter, LogDirectory, out error);
+
+        // The folder comes from LoggingService (tests pass a temp folder), never from log content. It is not created:
+        // a missing folder means there is no log yet. Shell-executed without arguments.
+        internal static bool OpenLogFolder(IProcessStarter starter, string folder, out string? error)
+        {
+            ArgumentNullException.ThrowIfNull(starter);
+            ArgumentException.ThrowIfNullOrEmpty(folder);
+            try
+            {
+                if (!Directory.Exists(folder))
+                {
+                    LogWarning("Could not open the log folder: it does not exist");
+                    error = "The folder does not exist yet.";
+                    return false;
+                }
+                starter.Start(new ProcessStartInfo(folder) { UseShellExecute = true })?.Dispose();
+                LogInfo("Log folder opened");
+                error = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Could not open the log folder: " + ex);
+                LogError("Could not open the log folder", ex);
                 error = ex.Message;
                 return false;
             }

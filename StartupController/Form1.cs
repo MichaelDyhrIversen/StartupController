@@ -20,7 +20,7 @@ namespace StartupController
         private readonly IUserSettings _settings;
         private readonly IStartupRegistry _registry;
         private readonly IProgramLauncher _launcher;
-        private readonly IProcessStarter _starter; // opens the log file
+        private readonly IProcessStarter _starter; // opens the log file and folder (log viewer)
         private readonly StartupListModel _model = new StartupListModel();
         private readonly OrderSaveCoordinator _saver;
         private readonly LaunchRunner _runner;
@@ -31,6 +31,10 @@ namespace StartupController
         private bool _startupWorkStarted;     // RunStartupAsync runs once, whether the window is shown or not
         private bool _manualLaunchInFlight;   // the Launch button ignores clicks until the current launch returns
         private int _restoreRequested;        // 1 = a second instance asked for the window (set from another thread)
+
+        // Modeless, unowned child windows (at most one each), closed with the main window
+        private HelpForm? _helpForm;
+        private LogViewerForm? _logViewer;
 
         // Owner of the tray menu and tooltips, disposed with the form. Always created by InitializeComponent;
         // ??= is a designer-time safety net.
@@ -51,7 +55,7 @@ namespace StartupController
         {
         }
 
-        // Concrete ProcessStarter: only the composition root calls this, to share one real starter (launcher, OpenLogs)
+        // Concrete ProcessStarter: only the composition root calls this, to share one real starter (launcher, log viewer)
         private Form1(IUserSettings settings, IStartupRegistry registry, ProcessStarter starter)
             : this(settings, registry, new ProgramLauncher(starter, Application.ExecutablePath), starter)
         {
@@ -99,16 +103,20 @@ namespace StartupController
                     AdjustListViewColumns();
             };
 
-            // Tray menu: Exit and Open Logs (the View Logs button opens the same file)
+            // Tray menu: View Logs and Help open the same windows as the buttons; Exit last (Windows convention)
+            var viewLogsItem = new ToolStripMenuItem("View Logs");
+            viewLogsItem.Click += (s, e) => ShowLogViewer();
+            var helpItem = new ToolStripMenuItem("Help");
+            helpItem.Click += (s, e) => ShowHelp();
             var exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += (s, e) => Application.Exit();
-            var openLogsItem = new ToolStripMenuItem("Open Logs");
-            openLogsItem.Click += (s, e) => OpenLogs();
             var trayMenu = new ContextMenuStrip(Components);
+            trayMenu.Items.Add(viewLogsItem);
+            trayMenu.Items.Add(helpItem);
+            trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add(exitItem);
-            trayMenu.Items.Add(openLogsItem);
             notifyIcon.ContextMenuStrip = trayMenu;
-            btnViewLogs.Click += (s, e) => OpenLogs();
+            btnViewLogs.Click += (s, e) => ShowLogViewer();
             SetUpToolTips();
             chkLaunchToTray.Checked = _settings.GetStartToTray();
             // Settings checkboxes: a failed write is logged and notified, and the checkbox reverts
@@ -132,6 +140,7 @@ namespace StartupController
 
             // Synchronous so e.Cancel is honoured and a save finishes before the process exits
             this.FormClosing += (s, e) => HandleFormClosing(e);
+            this.FormClosed += (s, e) => CloseChildWindows();
 
             // initial column sizing
             AdjustListViewColumns();
@@ -584,45 +593,71 @@ namespace StartupController
             }
         }
 
-        // Shown by the Help button. Keep in line with the Usage section of README.md. Non-ASCII characters are \u
-        // escapes so the file's encoding can't break them: \u2191 \u2193 \u21C8 \u21CA are the arrow buttons, \u2013 an en dash.
-        internal const string HelpText =
-            "Which programs are listed\n" +
-            "Every program in your Run key. Windows doesn't order startup programs, so StartupController takes over the ones " +
-            "Windows starts itself: it disables each one in Windows (Task Manager > Startup apps shows it as Disabled), lists it as " +
-            "Enabled and adds it at the end of the list. Programs the list already knows keep their position. It does this each time it " +
-            "loads, but only while \"Launch Enabled Programs On System Startup\" is checked and StartupController's own startup entry is " +
-            "enabled in Windows. The first login after a takeover is still started by Windows; from the next login " +
-            "StartupController starts the program, in your order, so nothing starts twice. StartupController's own entry is never listed.\n\n" +
-            "Enabled and Disabled\n" +
-            "Enabled means StartupController launches the program when you log in, in the order of the list " +
-            "(with \"Launch Enabled Programs On System Startup\" checked). Use Enable, Disable or double-click a row. " +
-            "Disabled means the program doesn't start at all: Windows no longer starts it and StartupController doesn't either. " +
-            "At login StartupController can't show a UAC prompt, so programs that need administrator rights aren't started then; " +
-            "the Launch button still asks for permission.\n\n" +
-            "Taking over and uninstalling\n" +
-            "If a taken-over program would start nowhere (StartupController's own entry is missing or disabled), a warning balloon " +
-            "tells you, even with notifications silenced. Uninstalling StartupController asks whether to give all taken-over programs " +
-            "back to Windows.\n\n" +
-            "Order\n" +
-            "\u2191 and \u2193 move the selected program one step, \u21C8 and \u21CA move it to the top or bottom. " +
-            "Click Save Order to keep the order and the Enabled settings. With \"Autosave on change\" every change is saved right away.\n\n" +
-            "\"Changed \u2013 re-enable to launch\"\n" +
-            "The program's command changed since you enabled it (for example after an update). Nothing launches it " +
-            "until you enable it again and save. After the next save it shows as Disabled.\n\n" +
-            "Run command format\n" +
-            "Put the full path in quotes, for example \"C:\\Program Files\\App\\app.exe\" --minimized. Relative paths " +
-            "are not started. \"Executable not found\" means the command could not be resolved to an existing file, " +
-            "often because an unquoted path with spaces or arguments was used. Quote the path in the Run entry and try again.\n\n" +
-            "Settings\n" +
-            "The checkboxes at the bottom: \"Silence Notifications\", \"Launch Enabled Programs On System Startup\", \"Launch To Tray\" and \"Autosave on change\".\n\n" +
-            "Launch and View Logs\n" +
-            "Launch starts the selected program now. View Logs opens the log of what was launched and any errors.";
-
+        // Help button, F1 and the tray's Help item. The text is StartupController/Help/Help.md (keep it in line with
+        // the Usage section of README.md) plus a generated About section.
         private void ShowHelp()
         {
+            if (IsLaunchMode) return; // the app exits right after launching
+            if (ActivateExisting(_helpForm)) return;
+
+            var sections = HelpContent.LoadEmbedded().Append(HelpContent.About(HelpContent.CurrentVersion(), LoggingService.LogDirectory)).ToList();
+            _helpForm = new HelpForm(sections) { Icon = this.Icon };
+            _helpForm.FormClosed += (s, e) => _helpForm = null;
             LoggingService.LogInfo("Help shown");
-            MessageBox.Show(this, HelpText, "StartupController Help", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            _helpForm.Show(); // no owner: stays usable while the main window is hidden in the tray
+        }
+
+        // View Logs button and the tray's View Logs item: the in-app, read-only log viewer
+        private void ShowLogViewer()
+        {
+            if (IsLaunchMode) return; // the app exits right after launching
+            if (ActivateExisting(_logViewer)) return;
+
+            _logViewer = new LogViewerForm(_starter, LoggingService.LogFilePath) { Icon = this.Icon };
+            _logViewer.FormClosed += (s, e) => _logViewer = null;
+            LoggingService.LogInfo("Log viewer opened");
+            _logViewer.Show(); // no owner, like Help
+        }
+
+        // Brings an open child window to the front (restored if minimized). False when there is none.
+        private static bool ActivateExisting(Form? window)
+        {
+            if (window == null || window.IsDisposed) return false;
+            if (window.WindowState == FormWindowState.Minimized)
+                window.WindowState = FormWindowState.Normal;
+            window.Show();
+            window.Activate();
+            return true;
+        }
+
+        // The child windows have no owner, so they are closed here when the main window closes
+        private void CloseChildWindows()
+        {
+            foreach (var window in new Form?[] { _helpForm, _logViewer })
+            {
+                if (window == null || window.IsDisposed) continue;
+                try
+                {
+                    window.Close(); // a modeless form disposes itself on Close
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError("Failed to close a child window", ex);
+                }
+            }
+            _helpForm = null;
+            _logViewer = null;
+        }
+
+        // F1 opens Help whatever control has focus
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.F1)
+            {
+                ShowHelp();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void SetUpToolTips()
@@ -636,19 +671,12 @@ namespace StartupController
             tips.SetToolTip(btnMoveTop, "Move to the top");
             tips.SetToolTip(btnMoveBottom, "Move to the bottom");
             tips.SetToolTip(btnSaveOrder, "Save the order and the Enabled settings");
-            tips.SetToolTip(btnViewLogs, "Open the log of what was launched and any errors");
-            tips.SetToolTip(btnHelp, "How StartupController works");
+            tips.SetToolTip(btnViewLogs, "Show the log of what was launched and any errors");
+            tips.SetToolTip(btnHelp, "How StartupController works (F1)");
             tips.SetToolTip(chkLaunchProgramsOnStartup, "At login, launch the enabled programs in the order of the list");
             tips.SetToolTip(chkLaunchToTray, "Start hidden in the tray, and hide to the tray when minimized");
             tips.SetToolTip(chkSilenceNotifications, "Don't show balloon notifications");
             tips.SetToolTip(chkAutoSaveOnChange, "Save every change right away");
-        }
-
-        // View Logs button and the tray's Open Logs item. A failure is logged by LoggingService and shown here.
-        private void OpenLogs()
-        {
-            if (LoggingService.OpenLogFile(_starter, out var error)) return;
-            ((IMessageDialog)this).ShowWarning($"Could not open the log file: {error}\n\nThe log is at:\n{LoggingService.LogFilePath}", "Startup Controller");
         }
 
         void INotifier.Notify(string message) => ShowNotification(message);

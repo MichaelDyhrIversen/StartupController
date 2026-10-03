@@ -77,5 +77,35 @@ namespace StartupController
         [DllImport("wtsapi32.dll", ExactSpelling = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         internal static extern void WTSFreeMemory(IntPtr pMemory);
+
+        // --- List view (LogViewerForm: select all rows of the virtual list in one message) ---
+
+        internal const int LVM_SETITEMSTATE = 0x1000 + 43;
+        internal const uint LVIF_STATE = 0x0008;
+        internal const uint LVIS_SELECTED = 0x0002;
+
+        // LVITEMW from CommCtrl.h. LVM_SETITEMSTATE reads only state and stateMask.
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        internal struct LVITEMW
+        {
+            public uint mask;
+            public int iItem;
+            public int iSubItem;
+            public uint state;
+            public uint stateMask;
+            public IntPtr pszText;
+            public int cchTextMax;
+            public int iImage;
+            public IntPtr lParam;
+            public int iIndent;
+            public int iGroupId;
+            public uint cColumns;
+            public IntPtr puColumns;
+            public IntPtr piColFmt;
+            public int iGroup;
+        }
+
+        [DllImport("user32.dll", EntryPoint = "SendMessageW", ExactSpelling = true)]
+        internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref LVITEMW lParam);
     }
 }

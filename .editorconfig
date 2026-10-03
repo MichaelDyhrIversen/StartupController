@@ -2,3 +2,7 @@
 
 # CS8602: Dereference of a possibly null reference.
 dotnet_diagnostic.CS8602.severity = suggestion
+
+# In-app help source: the arrows and dashes must survive editing (see HelpContent)
+[StartupController/Help/*.md]
+charset = utf-8-bom
