@@ -1,0 +1,42 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/StartupController.sln", "-nologo"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Test",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["test", "${workspaceFolder}/StartupController.sln", "-nologo"],
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Build installer (MSI)",
+            "detail": "Release MSI in SetupStartupController/bin/Release; verifies the uninstall custom action",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/SetupStartupController/SetupStartupController.wixproj", "-c", "Release", "-nologo"],
+            "group": "build",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Verify installer (MSI)",
+            "type": "process",
+            "command": "${env:SystemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "args": [
+                "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned",
+                "-File", "${workspaceFolder}/tools/Patch-UninstallCustomAction.ps1",
+                "-Msi", "${workspaceFolder}/SetupStartupController/bin/Release/StartupController.msi",
+                "-Verify"
+            ],
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

@@ -116,8 +116,11 @@ Example:
 
 ## Tests & continuous integration
 This is a C# project. Use dotnet commands to build and test:
+Requirements: the .NET 10 SDK is required (the repo builds with SDK 10.0.x). The MSI (WiX Toolset 6, restored from NuGet) needs nothing else, but must be built on x64.
 Build: dotnet build
 Run tests: dotnet test
+Installer: `dotnet build SetupStartupController -c Release` (VS Code task "Build installer (MSI)"). The solution builds it only in Release, so Debug `dotnet build`/`dotnet test` skip it. After linking it runs `tools/Patch-UninstallCustomAction.ps1 -Verify` on the MSI and fails the build (deleting the MSI) if the uninstall custom action is wrong. A new file in the app's publish output must be added to `Package.wxs` and `ExpectedAppFile` in the wixproj, or the build fails. See README.md, Building.
+xUnit string assertions must use `StringComparison.Ordinal` (culture-sensitive comparisons broke on da-DK); a guard test enforces this.
 Add tests for bug fixes and new features. Tests should be deterministic and fast where possible.
 Ensure CI (GitHub Actions or other) passes before requesting a final review.
 If you cannot run tests locally, explain in the PR how you validated the change.
@@ -139,3 +142,23 @@ Do not disclose security vulnerabilities in public issues. Instead:
 Check for a SECURITY.md file with disclosure instructions.
 
 ## Thank you for helping improve the project!
+
+## Running the tests and the sandbox rule
+
+Run all tests from the repo root:
+
+```bash
+dotnet test StartupController.sln
+```
+
+Check formatting before opening a PR. CI-style check, it changes nothing and fails if formatting differs:
+
+```bash
+dotnet format --verify-no-changes
+```
+
+Tests must never change this machine's real startup configuration or launch real programs. Never touch `HKCU\...\Run`, `StartupApproved` or `HKCU\Software\StartupController`.
+
+- **RegistrySandbox:** tests that need the registry use a throwaway key under `HKCU\Software\StartupController.Tests\p{pid}-{guid}`, deleted on dispose. If a crash leaves keys behind, they are harmless and can be deleted.
+- **FakeProcessStarter:** tests that launch programs use this fake, which records the request instead of starting anything.
+- **Guard tests:** tests scan the test and production source and fail if test code uses the real registry or process entry points, if production code uses real HKCU outside the composition roots, starts processes other than through the launcher seam, or uses HKLM. Keep new code and tests inside the sandbox and fake so they pass.

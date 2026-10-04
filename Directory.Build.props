@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Lets CI on Linux runners restore and build the Windows-only projects (NETSDK1100). No effect on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>
