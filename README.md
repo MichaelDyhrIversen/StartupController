@@ -17,7 +17,7 @@
 
 Requirements: Windows 10 version 1607 or later (or Windows 11) and the [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0). The installer checks for the runtime and links to the download if it is missing. Keep the runtime patched: turn on "Receive updates for other Microsoft products" in Windows Update settings so Microsoft Update delivers .NET security fixes, or install them manually.
 
-1. Download the latest release from the [Releases](#) page.
+1. Download the latest release from the [Releases](https://github.com/MichaelDyhrIversen/StartupController/releases) page.
 2. Run the installer and follow the on-screen instructions. It installs for all users. If an older version was installed "Just me" (for this user only), setup asks you to uninstall it first in Settings > Apps > Installed apps.
 3. (Optional) The application can be set to run at Windows startup via the settings.
 
